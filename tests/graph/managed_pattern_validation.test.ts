@@ -174,7 +174,7 @@ describe("managed pattern normalization edges", () => {
             })
         ]));
     });
-    it("accepts default public artifacts for targeted deep work rubrics", () => {
+    it("accepts explicitly authored public artifacts for targeted deep work rubrics", () => {
         const normalized = normalizeAuthoredGraphDocument(buildEnvelope({
             type: "pattern_deep_work",
             id: "implement",
@@ -182,6 +182,13 @@ describe("managed pattern normalization edges", () => {
                 goal: "Implement a change.",
                 acceptance_criteria: ["The managed deep work node publishes a valid summary and work-items index."],
                 constraints: []
+            },
+            artifacts: {
+                summary: {
+                    from: "output_dir",
+                    path: "summary.md",
+                    description: "Human-readable final summary requested by this graph."
+                }
             },
             completion: {
                 criteria: [

@@ -157,6 +157,7 @@ const runtimeProseRequiredPhrases = [
   "Rule: authoring rationale belongs outside graph JSON",
   "## Authoring Flow",
   "## Field Taxonomy",
+  "## Graph-Semantics Leak Review",
   "## Bad -> Good Examples",
   "research.angles[].prompt",
   "work_list.planning_goal",
@@ -166,6 +167,56 @@ const runtimeProseRequiredPhrases = [
   "context `what` / `why`",
   "artifact `description`"
 ];
+const intakeGrillRequiredPhrases = {
+  "skills/agentflow-intake/SKILL.md": [
+    "at most 3 rounds",
+    "at most 10 questions per round",
+    "Do not exceed 30 total grill questions"
+  ],
+  "skills/agentflow-intake/references/grill-questions.md": [
+    "## Bounded Grill-Me Protocol",
+    "Run at most 3 rounds",
+    "Ask at most 10 questions per round",
+    "Stop early when the workflow brief is coherent enough for authoring"
+  ]
+};
+const graphSemanticsRequiredPhrases = {
+  "skills/agentflow-authoring/SKILL.md": [
+    "graph-semantics leak review",
+    "graph-construction semantics",
+    "Every prompt-facing field was reviewed as LLM input"
+  ],
+  "skills/agentflow-authoring/references/runtime-prose-field-guide.md": [
+    "graph-construction semantics never belong in prompt-facing graph fields",
+    "## Graph-Semantics Leak Review",
+    "Graph JSON"
+  ],
+  "skills/agentflow-authoring/references/prompt-translation.md": [
+    "Graph JSON is prompt source code",
+    "Keep graph-building semantics"
+  ],
+  "skills/agentflow-authoring/references/intent-writing.md": [
+    "Intent is runtime prompt input",
+    "Do not mention graph construction"
+  ],
+  "skills/agentflow-authoring/references/graph-quality-bar.md": [
+    "Prompt-facing graph fields contain no graph-construction semantics"
+  ],
+  "skills/agentflow-plan-review/SKILL.md": [
+    "graph-semantics leakage",
+    "Every prompt-facing field was read as LLM input"
+  ],
+  "skills/agentflow-plan-review/references/prompt-translation-review.md": [
+    "Graph JSON is prompt source code",
+    "## Graph-Semantics Leak Findings"
+  ],
+  "skills/agentflow-plan-review/references/review-rubric.md": [
+    "Prompt semantics"
+  ],
+  "skills/agentflow-plan-review/references/anti-patterns.md": [
+    "Graph-semantics leak"
+  ]
+};
 const promptSurfaceExampleLeakPatterns = [
   /\bthis graph\b/iu,
   /\bthe graph should\b/iu,
@@ -413,6 +464,52 @@ async function validateSkills() {
     missingConstraintGuidance.length === 0
       ? 'Authoring and review guidance requires graph and node constraints to start with "Do not".'
       : `Missing Do not constraint guidance in: ${missingConstraintGuidance.join(", ")}`
+  );
+
+  const missingIntakeGrillGuidance = [];
+
+  for (const [file, phrases] of Object.entries(intakeGrillRequiredPhrases)) {
+    if (!await fileExists(file)) {
+      missingIntakeGrillGuidance.push(file);
+      continue;
+    }
+    const text = await readText(file);
+    for (const phrase of phrases) {
+      if (!text.includes(phrase)) {
+        missingIntakeGrillGuidance.push(`${file}: ${phrase}`);
+      }
+    }
+  }
+
+  record(
+    "bounded intake grill protocol",
+    missingIntakeGrillGuidance.length === 0,
+    missingIntakeGrillGuidance.length === 0
+      ? "Intake guidance requires at most 3 grill rounds of at most 10 questions and stops early when aligned."
+      : `Missing bounded intake grill guidance: ${missingIntakeGrillGuidance.join("; ")}`
+  );
+
+  const missingGraphSemanticsGuidance = [];
+
+  for (const [file, phrases] of Object.entries(graphSemanticsRequiredPhrases)) {
+    if (!await fileExists(file)) {
+      missingGraphSemanticsGuidance.push(file);
+      continue;
+    }
+    const text = await readText(file);
+    for (const phrase of phrases) {
+      if (!text.includes(phrase)) {
+        missingGraphSemanticsGuidance.push(`${file}: ${phrase}`);
+      }
+    }
+  }
+
+  record(
+    "graph semantics stay out of runtime prose",
+    missingGraphSemanticsGuidance.length === 0,
+    missingGraphSemanticsGuidance.length === 0
+      ? "Authoring and review skills require graph-construction semantics to stay out of prompt-facing graph fields."
+      : `Missing graph-semantics leak guidance: ${missingGraphSemanticsGuidance.join("; ")}`
   );
 
   const patchMarkerFiles = [];

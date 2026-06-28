@@ -50,6 +50,8 @@ Agentflow keeps a layered eval system:
 - Repeated trials: stochastic reliability measurement before releases.
 - Human QA runs: periodic checks that scenarios remain fair, solvable, and hard to game.
 
+Eval-driven changes must generalize. Do not add prompt text, runtime branches, supervisor routing, grader looseness, or managed-pattern behavior that names or implies a specific fixture repo, file path, package, hidden oracle, scenario id, or expected tactic. Before changing Agentflow because an eval failed, identify the generic failure class, check whether valid alternative success paths are still allowed, and prefer stronger measurement or broader scenarios when the result is fixture-specific.
+
 The sentinel suite intentionally has exactly five scenarios: three pinned real-world repository fixtures and two simulated controls. It covers managed patterns, primitive nodes, plugin workflow lowering, support capabilities, selected skills, managed tools, CLI hints, context pointers with `what`/`why`, checkpoint feedback, supervisor resume, deterministic graders, quality judges, hidden-oracle canaries, and delivery artifacts.
 
 ## Suite Schema
@@ -139,6 +141,25 @@ Legacy `expected`, `grading`, top-level `graders`, top-level `judges`, and `fixt
   "bucket": "valid-hard-execution",
   "difficulty": "hard",
   "description": "The node needs version-specific docs from a local fixture to recover.",
+  "measurement": {
+    "claim": "Agentflow should recover from missing dependency docs without changing forbidden files.",
+    "scenario_type": "capability:supervisor-recovery",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "workspace scope",
+      "supervisor recovery",
+      "trajectory discipline",
+      "delivery auditability"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing or unsupported",
+      "workspace changes are forbidden or out of scope",
+      "expected supervisor recovery behavior is missing"
+    ],
+    "tweak_signal": "Inspect context packaging, supervisor classification, recovery learning, retry evidence, and delivery curation before changing prompt text."
+  },
   "environment": {
     "repo": "repo",
     "docs": "docs",
@@ -198,6 +219,12 @@ Legacy `expected`, `grading`, top-level `graders`, top-level `judges`, and `fixt
       ],
       "apply_actions": [
         "retry_node"
+      ],
+      "recovery_diagnoses": [
+        "guidance_ignored"
+      ],
+      "forbidden_apply_actions": [
+        "pause_for_authority"
       ]
     },
     "trajectory": {
@@ -221,6 +248,8 @@ Legacy `expected`, `grading`, top-level `graders`, top-level `judges`, and `fixt
 }
 ```
 
+`measurement` is required for every scenario. It is not graph context and does not change runtime behavior; it tells reviewers what claim the scenario measures, which metrics matter, which failure modes are meaningful, and what kind of generic Agentflow surface to inspect before changing behavior. A scenario that can fail without pointing to a likely prompt, context, artifact, supervisor, verifier, managed-pattern, graph-shape, or grader adjustment is too vague.
+
 Environment behavior:
 
 - `repo` is copied into an isolated trial workspace.
@@ -242,7 +271,9 @@ Template variables:
 
 ## Trajectory Criteria
 
-Trace packets include `trajectory`, a chronological sequence of node attempts, runtime events, completion packets, `af` runtime CLI calls, simulation calls, artifact writes, and delivery events. They also expose supervisor resume decisions under `supervisor.resume_decisions` so custom graders can assert the retry boundary, workspace decision, and reason code directly. Trajectory criteria support:
+Trace packets include `trajectory`, a chronological sequence of node attempts, runtime events, completion packets, `af` runtime CLI calls, simulation calls, artifact writes, and delivery events. They also expose supervisor resume decisions under `supervisor.resume_decisions`, intervention decision material-delta counts under `supervisor.intervention_decisions`, recovery-learning records under `supervisor.recovery_learning`, and prompt/context diagnostics summaries under `prompt_diagnostics`. Use these structured fields before inferring behavior from free-text summaries.
+
+Trajectory criteria support:
 
 - `exact_order`: full trajectory must match the listed events.
 - `contains_ordered`: listed events must appear in order.
@@ -260,6 +291,15 @@ Completion-contract evals should prefer trajectory checks for runtime discipline
 - require `{ "kind": "completion_packet", "completion_status": "blocked" }` only when the packet also carries trusted typed `authority_requests`.
 
 Managed-pattern scenarios may assert `af spawn --purpose ... --wait` only when runtime orchestration authority is present and the helper artifact appears before the parent completion packet becomes ready. Supervisor recovery scenarios may assert fixed read-only helper roles such as `af spawn --role evidence_mapper ... --wait` only inside supervisor/managed recovery traces, never as ordinary worker behavior.
+
+Supervisor criteria can require or forbid recovery evidence:
+
+- `classifications`, `gatherers`, and `apply_actions` assert observed supervisor decisions.
+- `forbidden_apply_actions` asserts actions such as human pause or authority escalation did not happen when the failure should be automated.
+- `recovery_diagnoses` asserts recovery-learning labels such as ignored guidance or followed-but-insufficient guidance were recorded.
+- `forbidden_recovery_diagnoses` guards against the wrong repeated-failure interpretation.
+
+Expected human pauses should require typed runtime authority, such as missing credentials or an authored checkpoint. Graph-contract, scope, validation, context, workspace, and artifact failures should normally be expected `failed` or automated-recovery outcomes, not untyped human escalation.
 
 ## Custom Script Criteria
 
@@ -316,7 +356,9 @@ They must print JSON:
 }
 ```
 
-Variant ids are anonymized in quality packets. Required deterministic criteria remain authoritative: a candidate cannot win by having better quality scores while adding hard blockers.
+Variant ids are anonymized in quality packets. Quality judges receive target-specific packets for one criterion and one trial trace; they should cite trace or artifact evidence rather than re-running the workflow. Required deterministic criteria remain authoritative: a candidate cannot win by having better quality scores while adding hard blockers. A quality criterion also fails closed when the trace packet records a non-passing run outcome, even if the LLM judge returns `passed_quality_bar: true`.
+
+Prompt/context diagnostics are human-debug evidence, not worker context. Trace packets and scorecards may summarize diagnostic counts, prompt sizes, context pointer counts, glob counts, read-first counts, and warnings so prompt/context failures can be reviewed without exposing raw debug artifacts to normal workers.
 
 Prompt packs are eval labels, not runtime compatibility modes. Agentflow keeps one active prompt contract; eval variants can label `current` and `candidate` prompt experiments so reports and prompt diff artifacts are auditable.
 
@@ -380,6 +422,8 @@ Run behavior:
 
 Review `report.md` first, then failing `scorecard.json`, `criteria-results.json`, `trace-packet.json`, criterion output directories, and the underlying run root named in `run-root.txt`.
 
+Reports should show the scenario measurement claim, deterministic blockers, quality deltas, prompt/context diagnostic warnings, recovery-learning evidence, and whether Agentflow beat direct Codex or only added orchestration around a similar result.
+
 ## Built-In Suites
 
 - `evals/agentflow-validation`: flagship five-scenario sentinel suite for full Agentflow mission validation. Run `agentflow eval validate evals/agentflow-validation` before broad eval changes and run the two simulated sentinel scenarios as fast regression gates when practical. Release confidence requires `npm run validate:release-confidence`, which runs all five sentinels with three trials.
@@ -389,3 +433,5 @@ Review `report.md` first, then failing `scorecard.json`, `criteria-results.json`
 - `evals/agentflow-realworld-issues`: pinned MIT real-world issue suite generated with `npm run setup:realworld-evals`.
 
 Commit only portable fixture seeds, metadata, regression patches, rubrics, and scripts. Do not commit cloned third-party repos, generated eval repos, dependency installs, or eval output roots.
+
+For engineering parity, direct Codex and Agentflow receive the same neutral task facts and validation expectations. If direct Codex passes deterministic checks and Agentflow fails, treat that as an Agentflow regression regardless of quality-judge preference. If both pass, compare scope control, validation evidence, handoff quality, delivery auditability, attempts, and recovery overhead.

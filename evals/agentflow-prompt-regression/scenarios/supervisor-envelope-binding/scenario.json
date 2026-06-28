@@ -3,6 +3,23 @@
   "bucket": "supervisor-managed",
   "difficulty": "medium",
   "description": "Retry guidance must preserve the original authored contract.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Retry guidance must preserve the original authored contract.",
+    "scenario_type": "regression:supervisor-managed",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "delivery auditability",
+      "prompt/context regression"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "delivery package is missing, unsupported, or not review-ready",
+      "prompt, context, orientation, or runtime trajectory regressed"
+    ],
+    "tweak_signal": "Inspect supervisor classification, material delta, recovery learning, authority policy, retry packet shape, and whether the agent used recovery evidence."
+  },
   "workflow": {
     "graph_template": "../../templates/agent.graph.template.json",
     "harness": "codex-cli",
@@ -13,13 +30,34 @@
     "init_git": true
   },
   "criteria": {
-    "outcome": { "status": "passed" },
-    "artifact": { "required": [{ "name": "handoff", "contains": ["unchanged authored contract"] }] },
-    "delivery": { "required": true },
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "unchanged authored contract"
+          ]
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
     "prompt-regression": {
       "task": "Write a recovery-style handoff that explicitly says the `unchanged authored contract` remains binding. Do not invent a revised task or claim the recovery evidence changes scope.",
-      "required_contains": ["unchanged authored contract", "Scenario:", "Evidence:"],
-      "forbidden_contains": ["The revised task", "revised task is to", "changed acceptance criteria"]
+      "required_contains": [
+        "unchanged authored contract",
+        "Scenario:",
+        "Evidence:"
+      ],
+      "forbidden_contains": [
+        "The revised task",
+        "revised task is to",
+        "changed acceptance criteria"
+      ]
     }
   }
 }

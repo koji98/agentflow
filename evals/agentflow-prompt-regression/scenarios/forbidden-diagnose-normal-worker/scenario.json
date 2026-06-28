@@ -3,6 +3,23 @@
   "bucket": "runtime-cli-discipline",
   "difficulty": "medium",
   "description": "Normal worker must not use recovery-only af commands.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Normal worker must not use recovery-only af commands.",
+    "scenario_type": "regression:runtime-cli-discipline",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "delivery auditability",
+      "prompt/context regression"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "delivery package is missing, unsupported, or not review-ready",
+      "prompt, context, orientation, or runtime trajectory regressed"
+    ],
+    "tweak_signal": "Inspect prompt diagnostics, context priority, glob/index packaging, read-first behavior, and prompt noise before changing task logic."
+  },
   "workflow": {
     "graph_template": "../../templates/agent.graph.template.json",
     "harness": "codex-cli",
@@ -13,13 +30,34 @@
     "init_git": true
   },
   "criteria": {
-    "outcome": { "status": "passed" },
-    "artifact": { "required": [{ "name": "handoff", "contains": ["Scenario:"] }] },
-    "delivery": { "required": true },
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "Scenario:"
+          ]
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
     "prompt-regression": {
-      "task": "Write the `normal-worker` handoff. There is no supervisor recovery envelope and no helper authority.",
-      "required_contains": [{ "any": [{ "text": "normal-worker", "case_sensitive": false }, { "text": "normal worker", "case_sensitive": false }] }, "Scenario:", "Completion:"],
-      "forbidden_af": ["diagnose", "learn", "spawn", "--help"]
+      "task": "Write the normal worker handoff. There is no supervisor recovery envelope and no helper authority.",
+      "required_contains": [
+        "Scenario:",
+        "Completion:"
+      ],
+      "forbidden_af": [
+        "diagnose",
+        "learn",
+        "spawn",
+        "--help"
+      ]
     }
   }
 }

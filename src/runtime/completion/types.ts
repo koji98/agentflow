@@ -4,6 +4,7 @@ import type { RuntimeNodeAttempt } from "../attempts.js";
 import type { AuthorityRequest } from "../authority.js";
 import type { SupervisorRecoveryEnvelope } from "../../supervisor/types.js";
 import type { ManagedContractFinding } from "../managed/contract_failures.js";
+import type { RuntimeOrientationMode } from "../orientation.js";
 
 export const completionStatuses = ["ready_for_verification", "incomplete", "blocked"] as const;
 export type CompletionStatus = (typeof completionStatuses)[number];
@@ -116,6 +117,10 @@ export interface CompletionMilestoneSummary {
 
 export interface CompletionOrientationSummary {
   orient_called: boolean;
+  orient_call_count: number;
+  first_orient_at?: string;
+  last_orient_at?: string;
+  modes_seen: RuntimeOrientationMode[];
   evidence_ref?: string;
 }
 

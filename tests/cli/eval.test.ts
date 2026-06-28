@@ -216,6 +216,18 @@ async function writeWorkflowEvalFixture(tempRoot: string): Promise<{
         bucket: "valid-hard-execution",
         difficulty: "medium",
         description: "A deterministic workflow must write a declared handoff artifact.",
+        measurement: {
+            claim: "Agentflow eval CLI should run a deterministic workflow and produce graded trace evidence.",
+            scenario_type: "regression",
+            metrics: ["final outcome", "artifact evidence", "workspace scope", "trajectory discipline", "delivery auditability"],
+            expected_failure_modes: [
+                "eval validate rejects the suite",
+                "required artifact is missing",
+                "simulation trajectory is missing",
+                "delivery package is not review-ready"
+            ],
+            tweak_signal: "Inspect eval suite loading, trace packet generation, deterministic criteria, and delivery curation."
+        },
         environment: {
             repo: "repo",
             init_git: true,

@@ -3,6 +3,23 @@
   "bucket": "runtime-cli-discipline",
   "difficulty": "hard",
   "description": "Progress logs must be backed by verification evidence.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Progress logs must be backed by verification evidence.",
+    "scenario_type": "regression:runtime-cli-discipline",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "delivery auditability",
+      "prompt/context regression"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "delivery package is missing, unsupported, or not review-ready",
+      "prompt, context, orientation, or runtime trajectory regressed"
+    ],
+    "tweak_signal": "Inspect prompt diagnostics, context priority, glob/index packaging, read-first behavior, and prompt noise before changing task logic."
+  },
   "workflow": {
     "graph_template": "../../templates/agent.graph.template.json",
     "harness": "codex-cli",
@@ -16,21 +33,55 @@
         {
           "id": "progress-validation-ok",
           "command": "prompt-validate",
-          "match": { "argv_exact": ["--case", "progress"] },
-          "response": { "stdout": "progress validation passed\n" }
+          "match": {
+            "argv_exact": [
+              "--case",
+              "progress"
+            ]
+          },
+          "response": {
+            "stdout": "progress validation passed\n"
+          }
         }
       ]
     }
   },
   "criteria": {
-    "outcome": { "status": "passed" },
-    "artifact": { "required": [{ "name": "handoff", "contains": ["progress validation passed"] }] },
-    "delivery": { "required": true },
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "progress validation passed"
+          ]
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
     "prompt-regression": {
       "task": "Run `prompt-validate --case progress`. After it passes, record validation evidence with `af milestone log --kind validation --command \"prompt-validate --case progress\" --result pass`. Then publish the handoff.",
-      "required_contains": ["progress validation passed", "Scenario:", "Validation:"],
-      "required_milestone_logs": [{ "kind": "validation", "result": "pass" }],
-      "required_simulation": [{ "command": "prompt-validate", "rule_id": "progress-validation-ok" }]
+      "required_contains": [
+        "progress validation passed",
+        "Scenario:",
+        "Validation:"
+      ],
+      "required_milestone_logs": [
+        {
+          "kind": "validation",
+          "result": "pass"
+        }
+      ],
+      "required_simulation": [
+        {
+          "command": "prompt-validate",
+          "rule_id": "progress-validation-ok"
+        }
+      ]
     }
   }
 }

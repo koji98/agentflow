@@ -36,10 +36,20 @@ export type ContextPacketSource =
   | RuntimeSupervisorRecoveryContext
   | RuntimeSupervisorContextRepairContext;
 
+export const contextPriorityBuckets = ["read_first", "current_work", "task_context", "progress_state", "reference_set"] as const;
+export type ContextPriorityBucket = (typeof contextPriorityBuckets)[number];
+
 export interface ContextPacketLiveWorkspaceBinding {
   kind: "live_workspace_input";
   requested_path?: string;
   resolved_path: string;
+}
+
+export interface ContextPacketGlobFile {
+  path: string;
+  resolved_path: string;
+  digest: string;
+  size_bytes: number;
 }
 
 export interface ContextPacketMaterializedItem {
@@ -50,6 +60,19 @@ export interface ContextPacketMaterializedItem {
   digest?: string;
   size_bytes?: number;
   binding?: ContextPacketLiveWorkspaceBinding;
+  priority_bucket?: ContextPriorityBucket;
+  priority_rank?: number;
+  priority_reason?: string;
+  is_broad_reference?: boolean;
+  source_authored_order?: number;
+  glob_pattern?: string;
+  match_count?: number;
+  included_count?: number;
+  omitted_count?: number;
+  glob_limit?: number;
+  ignored_roots_skipped?: string[];
+  explicit_ignored_root_opt_in?: string;
+  glob_files?: ContextPacketGlobFile[];
 }
 
 export interface ContextPacketOmittedItem {
@@ -81,6 +104,7 @@ export interface ContextDigestEntry {
 
 export interface ContextResolvedDigestEntry extends ContextDigestEntry {
   resolved_path: string;
+  size_bytes?: number;
 }
 
 export interface WorkspaceFileContextProvenance {

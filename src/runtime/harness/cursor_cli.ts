@@ -6,6 +6,7 @@ import { getHarnessCapabilities } from "../../graph/harness_capabilities.js";
 import { createAuthorityRequest } from "../authority.js";
 import { createProcessTerminationController } from "../process_control.js";
 import { startSpawnBroker } from "./spawn_broker.js";
+import { writePromptDiagnostics } from "./prompt_diagnostics.js";
 import {
   buildHarnessSpawnEnv,
   collectMissingHarnessBinaryDiagnostics,
@@ -346,6 +347,15 @@ export function createCursorCliHarness(
       if (invocation.promptPath) {
         await mkdir(dirname(invocation.promptPath), { recursive: true });
         await writeFile(invocation.promptPath, `${prompt}\n`, "utf8");
+        await writePromptDiagnostics({
+          invocation,
+          prompt: `${prompt}\n`,
+          renderer: "renderHarnessPrompt",
+          promptPath: invocation.promptPath,
+          metadata: {
+            harness: "cursor-cli"
+          }
+        });
       }
       const cursorConfig = harnessConfig.isolation === "isolated"
         ? await createCursorConfig(invocation, harnessConfig)

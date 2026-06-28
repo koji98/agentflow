@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { access, chmod, cp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { runCommand } from "../cli/commands/run.js";
@@ -691,6 +691,36 @@ async function evaluateSupervisorCriterion(options: {
     }
   }
 
+  for (const action of readStringArray(supervisor.forbidden_apply_actions)) {
+    const observed = options.tracePacket?.supervisor.apply_actions.includes(action) ?? false;
+    const passed = !observed;
+    assertions.push({ id: `supervisor_forbidden_apply_action:${action}`, passed });
+    if (!passed) {
+      blockers.push(`Forbidden supervisor apply action "${action}" was observed.`);
+    }
+  }
+
+  const recoveryDiagnoses = options.tracePacket?.supervisor.recovery_learning
+    .map((entry) => entry.diagnosis)
+    .filter((diagnosis): diagnosis is string => typeof diagnosis === "string") ?? [];
+
+  for (const diagnosis of readStringArray(supervisor.recovery_diagnoses)) {
+    const passed = recoveryDiagnoses.includes(diagnosis);
+    assertions.push({ id: `supervisor_recovery_diagnosis:${diagnosis}`, passed });
+    if (!passed) {
+      blockers.push(`Expected supervisor recovery diagnosis "${diagnosis}" was not observed.`);
+    }
+  }
+
+  for (const diagnosis of readStringArray(supervisor.forbidden_recovery_diagnoses)) {
+    const observed = recoveryDiagnoses.includes(diagnosis);
+    const passed = !observed;
+    assertions.push({ id: `supervisor_forbidden_recovery_diagnosis:${diagnosis}`, passed });
+    if (!passed) {
+      blockers.push(`Forbidden supervisor recovery diagnosis "${diagnosis}" was observed.`);
+    }
+  }
+
   return criterionResult({
     criterion: options.criterion,
     passed: blockers.length === 0,
@@ -910,6 +940,7 @@ async function evaluateCriteria(options: {
         suite_dir: options.loaded.suite_dir,
         scenario: options.scenario,
         variant_id: options.variant.id,
+        variant_env: options.variant.env,
         trial_id: options.trial_id,
         run_root: options.run_root,
         trace_file: options.trace_file,
@@ -1008,7 +1039,12 @@ function buildScorecard(options: {
       attempts: options.tracePacket?.metrics.attempts ?? 0,
       recovery_cycles: options.tracePacket?.metrics.recovery_cycles ?? 0,
       ...(options.tracePacket?.metrics.duration_ms !== undefined ? { duration_ms: options.tracePacket.metrics.duration_ms } : {}),
-      blockers: blockerCount
+      blockers: blockerCount,
+      ...(options.tracePacket ? { prompt_diagnostics_count: options.tracePacket.metrics.prompt_diagnostics_count } : {}),
+      ...(options.tracePacket ? { prompt_diagnostics_warnings: options.tracePacket.metrics.prompt_diagnostics_warnings } : {}),
+      ...(options.tracePacket ? { prompt_diagnostics_total_chars: options.tracePacket.metrics.prompt_diagnostics_total_chars } : {}),
+      ...(options.tracePacket ? { prompt_diagnostics_max_chars: options.tracePacket.metrics.prompt_diagnostics_max_chars } : {}),
+      ...(options.tracePacket ? { recovery_learning_records: options.tracePacket.metrics.recovery_learning_records } : {})
     },
     prompt_feedback: mergePromptFeedback(options.criteria_results),
     ...(options.error ? { error: options.error } : {})
@@ -1408,14 +1444,29 @@ function computeBenchmark(
   };
 }
 
-interface PromptSnapshot {
+export interface PromptSnapshot {
   relative_path: string;
   bytes: number;
   lines: number;
   sha256: string;
+  diagnostics?: PromptDiagnosticsSnapshot;
 }
 
-interface PromptDiffEntry {
+export interface PromptDiagnosticsSnapshot {
+  relative_path: string;
+  prompt_kind?: string;
+  renderer?: string;
+  total_chars?: number;
+  context_pointer_count?: number;
+  context_pointer_kinds: string[];
+  warnings: string[];
+  largest_sections: Array<{
+    name: string;
+    chars: number;
+  }>;
+}
+
+export interface PromptDiffEntry {
   scenario_id: string;
   trial_id: string;
   baseline_variant: string;
@@ -1428,9 +1479,69 @@ interface PromptDiffEntry {
   byte_delta: number;
   changed: boolean;
   status: "changed" | "unchanged" | "missing_baseline" | "missing_candidate";
+  baseline_diagnostics?: PromptDiagnosticsSnapshot;
+  candidate_diagnostics?: PromptDiagnosticsSnapshot;
 }
 
-async function collectPromptSnapshots(runRoot: string | undefined): Promise<PromptSnapshot[]> {
+function diagnosticsCandidatesForPrompt(promptPath: string): string[] {
+  const promptDir = dirname(promptPath);
+  const candidates = [join(promptDir, "prompt-diagnostics.json")];
+  if (promptPath.endsWith("/agent/prompt.md")) {
+    candidates.push(join(promptDir, "..", "human-debug", "prompt-diagnostics.json"));
+  }
+  return [...new Set(candidates.map((candidate) => resolve(candidate)))];
+}
+
+function summarizePromptDiagnostics(relativePath: string, value: unknown): PromptDiagnosticsSnapshot | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const sections = Array.isArray(value.sections)
+    ? value.sections.filter((section): section is { name: unknown; chars: unknown } => isRecord(section))
+    : [];
+
+  return {
+    relative_path: relativePath,
+    ...(typeof value.prompt_kind === "string" ? { prompt_kind: value.prompt_kind } : {}),
+    ...(typeof value.renderer === "string" ? { renderer: value.renderer } : {}),
+    ...(typeof value.total_chars === "number" ? { total_chars: value.total_chars } : {}),
+    ...(typeof value.context_pointer_count === "number" ? { context_pointer_count: value.context_pointer_count } : {}),
+    context_pointer_kinds: readStringArray(value.context_pointer_kinds),
+    warnings: readStringArray(value.warnings),
+    largest_sections: sections
+      .map((section) => ({
+        name: typeof section.name === "string" ? section.name : "unknown",
+        chars: typeof section.chars === "number" ? section.chars : 0
+      }))
+      .sort((left, right) => right.chars - left.chars)
+      .slice(0, 3)
+  };
+}
+
+async function readPromptDiagnostics(root: string, promptPath: string): Promise<PromptDiagnosticsSnapshot | undefined> {
+  for (const candidate of diagnosticsCandidatesForPrompt(promptPath)) {
+    if (!await pathExists(candidate)) {
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(await readFile(candidate, "utf8")) as unknown;
+      return summarizePromptDiagnostics(relative(root, candidate), parsed);
+    } catch {
+      return {
+        relative_path: relative(root, candidate),
+        context_pointer_kinds: [],
+        warnings: ["diagnostics_unreadable"],
+        largest_sections: []
+      };
+    }
+  }
+
+  return undefined;
+}
+
+export async function collectPromptSnapshots(runRoot: string | undefined): Promise<PromptSnapshot[]> {
   if (!runRoot || !await pathExists(runRoot)) {
     return [];
   }
@@ -1451,11 +1562,13 @@ async function collectPromptSnapshots(runRoot: string | undefined): Promise<Prom
       }
 
       const content = await readFile(path, "utf8");
+      const diagnostics = await readPromptDiagnostics(root, path);
       snapshots.push({
         relative_path: relative(root, path),
         bytes: Buffer.byteLength(content, "utf8"),
         lines: content.split(/\r?\n/u).length,
-        sha256: hashText(content)
+        sha256: hashText(content),
+        ...(diagnostics ? { diagnostics } : {})
       });
     }));
   }
@@ -1464,7 +1577,7 @@ async function collectPromptSnapshots(runRoot: string | undefined): Promise<Prom
   return snapshots.sort((left, right) => left.relative_path.localeCompare(right.relative_path));
 }
 
-async function buildPromptDiffEntries(results: EvalTrialResult[], variants: EvalVariant[]): Promise<PromptDiffEntry[]> {
+export async function buildPromptDiffEntries(results: EvalTrialResult[], variants: EvalVariant[]): Promise<PromptDiffEntry[]> {
   if (variants.length < 2) {
     return [];
   }
@@ -1514,6 +1627,8 @@ async function buildPromptDiffEntries(results: EvalTrialResult[], variants: Eval
           prompt_path: promptPath,
           ...(baselineSnapshot ? { baseline_sha256: baselineSnapshot.sha256, baseline_bytes: baselineSnapshot.bytes } : {}),
           ...(candidateSnapshot ? { candidate_sha256: candidateSnapshot.sha256, candidate_bytes: candidateSnapshot.bytes } : {}),
+          ...(baselineSnapshot?.diagnostics ? { baseline_diagnostics: baselineSnapshot.diagnostics } : {}),
+          ...(candidateSnapshot?.diagnostics ? { candidate_diagnostics: candidateSnapshot.diagnostics } : {}),
           byte_delta: (candidateSnapshot?.bytes ?? 0) - (baselineSnapshot?.bytes ?? 0),
           changed,
           status
@@ -1525,7 +1640,22 @@ async function buildPromptDiffEntries(results: EvalTrialResult[], variants: Eval
   return entries;
 }
 
-function renderPromptDiffReport(options: {
+function promptDiagnosticsWarningLines(entries: PromptDiffEntry[]): string[] {
+  const lines = entries.flatMap((entry) => {
+    const diagnostics = [
+      ...(entry.baseline_diagnostics ? [{ label: "baseline", diagnostics: entry.baseline_diagnostics }] : []),
+      ...(entry.candidate_diagnostics ? [{ label: "candidate", diagnostics: entry.candidate_diagnostics }] : [])
+    ];
+    return diagnostics.flatMap(({ label, diagnostics }) =>
+      diagnostics.warnings.map((warning) =>
+        `- ${entry.scenario_id} / ${entry.trial_id} / ${entry.prompt_path} / ${label}: \`${warning}\``
+      )
+    );
+  });
+  return lines.length > 0 ? lines : ["- No prompt diagnostics warnings were recorded."];
+}
+
+export function renderPromptDiffReport(options: {
   variants: EvalVariant[];
   entries: PromptDiffEntry[];
 }): string {
@@ -1551,7 +1681,10 @@ function renderPromptDiffReport(options: {
       ? options.entries.map((entry) =>
           `- ${entry.scenario_id} / ${entry.trial_id} / ${entry.baseline_variant}->${entry.candidate_variant} / ${entry.prompt_path}: ${entry.status}, byte_delta=${entry.byte_delta}`
         )
-      : ["- No rendered prompt files were available for comparison."])
+      : ["- No rendered prompt files were available for comparison."]),
+    "",
+    "## Prompt Diagnostics Warnings",
+    ...promptDiagnosticsWarningLines(options.entries)
   ].join("\n");
 }
 

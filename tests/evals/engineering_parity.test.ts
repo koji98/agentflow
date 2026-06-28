@@ -18,12 +18,14 @@ describe("engineering parity eval suite", () => {
       "settings-schema-defaults",
       "duration-parser-refactor",
       "stale-docs-code-conflict",
-      "frontend-tabs-reducer"
+      "frontend-tabs-reducer",
+      "workflow-orchestrator-complex"
     ]);
     expect(loaded.variants.map((variant) => variant.id)).toEqual([
       "current",
       "deep-work",
-      "work-list"
+      "work-list",
+      "best-practice"
     ]);
     expect(loaded.criteria.map((criterion) => [criterion.id, criterion.kind])).toEqual([
       ["outcome", "outcome"],
@@ -111,6 +113,54 @@ describe("engineering parity eval suite", () => {
     expect(JSON.stringify(deepWork.graph)).not.toMatch(/direct codex baseline|codex goal mode/iu);
     expect(JSON.stringify(workList.graph)).not.toMatch(/direct codex baseline|codex goal mode/iu);
   });
+
+  it("renders the long-running best-practice scenario from its scenario graph", async () => {
+    const loaded = await loadEvalSuite(process.cwd(), "evals/agentflow-engineering-parity");
+    const scenario = loaded.scenarios.find((entry) => entry.id === "workflow-orchestrator-complex")!;
+    const variant = loaded.variants.find((entry) => entry.id === "best-practice")!;
+    const rendered = await renderGraphTemplate({
+      suite_dir: loaded.suite_dir,
+      template_path: variant.graph_template_path ?? scenario.graph_template_path,
+      scenario,
+      variant,
+      trial: {
+        id: "trial-001",
+        index: 1,
+        root: "/tmp/trial"
+      },
+      environment: {
+        repo: "/tmp/trial/workspace/repo"
+      }
+    });
+    const graph = rendered.graph as any;
+
+    expect(rendered.diagnostics).toEqual([]);
+    expect(graph.graph.steps.map((step: { type: string }) => step.type)).toEqual([
+      "pattern_deep_work"
+    ]);
+    expect(graph.supervision).toEqual(expect.objectContaining({
+      max_total_interventions: 2
+    }));
+    expect(graph.graph.steps[0]).toEqual(expect.objectContaining({
+      id: "orchestrator_delivery",
+      type: "pattern_deep_work"
+    }));
+    expect(graph.profiles.default).toEqual(expect.objectContaining({
+      model: "gpt-5.5",
+      reasoning_effort: "high"
+    }));
+    expect(graph.profiles.supervisor).toEqual(expect.objectContaining({
+      model: "gpt-5.5",
+      reasoning_effort: "high"
+    }));
+    expect(graph.graph.steps[0].completion.criteria[0]).toEqual(expect.objectContaining({
+      id: "validation",
+      kind: "command",
+      command: "npm test"
+    }));
+    expect(graph.graph.steps[0].artifacts).toHaveProperty("handoff");
+    expect(JSON.stringify(graph)).not.toMatch(/graph template|managed pattern|direct codex baseline/iu);
+  });
 });
 
 describe("engineering parity grader helpers", () => {
@@ -161,6 +211,8 @@ describe("engineering parity grader helpers", () => {
       sourceRepo,
       outputDir: join(tempRoot, "out"),
       label: "direct-codex",
+      model: "gpt-5.5",
+      reasoning_effort: "high",
       oracle: {
         validation_commands: ["npm test"],
         required_changed_files: ["src.js"],
@@ -171,6 +223,12 @@ describe("engineering parity grader helpers", () => {
     });
 
     expect(result.args).not.toContain("--goal");
+    expect(result.args).toEqual(expect.arrayContaining([
+      "-m",
+      "gpt-5.5",
+      "-c",
+      "model_reasoning_effort=\"high\""
+    ]));
     expect(result.workspace_result.passed).toBe(true);
     expect(result.workspace_result.git.changed_files).toEqual(["src.js"]);
     expect(await readFile(join(tempRoot, "out", "direct-codex", "workspace", "task.md"), "utf8")).toContain("Fix src.js");
@@ -253,6 +311,105 @@ describe("engineering parity grader helpers", () => {
 
     expect(verdict.passed).toBe(false);
     expect(verdict.blockers).toContain("Direct Codex passed deterministic checks while Agentflow did not.");
+  });
+
+  it("classifies work-list use on the complex implementation scenario as pattern-fit failure", async () => {
+    const grader = await importGrader();
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engineering-parity-pattern-fit-"));
+    const patternDiagnostics = grader.detectPatternFitDiagnostics({
+      scenarioId: "workflow-orchestrator-complex",
+      renderedGraph: {
+        graph: {
+          steps: [
+            { type: "pattern_work_list" }
+          ]
+        }
+      },
+      agentflow: { passed: false },
+      direct: {
+        exit_code: 0,
+        workspace_result: { passed: true }
+      }
+    });
+    const verdict = grader.buildParityVerdict({
+      outputDir: tempRoot,
+      direct: {
+        exit_code: 0,
+        workspace_result: { passed: true }
+      },
+      agentflow: {
+        passed: false,
+        checks: {
+          out_of_scope_changes: [],
+          forbidden_changes: []
+        }
+      },
+      pairwiseJudge: {
+        parsed: {
+          preferred_candidate: "B",
+          scores: { A: 2, B: 5 }
+        }
+      },
+      mapping: {
+        A: "agentflow",
+        B: "direct-codex"
+      },
+      patternDiagnostics
+    });
+
+    expect(patternDiagnostics.work_list_misfit).toBe(true);
+    expect(patternDiagnostics.work_list_for_coherent_task).toBe(true);
+    expect(patternDiagnostics.failure_taxonomy).toContain("pattern_fit");
+    expect(verdict.blockers).toContain("Direct Codex passed while Agentflow used pattern_work_list for a coherent implementation task; classify this as pattern-fit failure before worker-quality failure.");
+  });
+
+  it("classifies direct quality wins over work-list on coherent implementation as pattern-fit failure", async () => {
+    const grader = await importGrader();
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engineering-parity-pattern-fit-quality-"));
+    const patternDiagnostics = grader.detectPatternFitDiagnostics({
+      scenarioId: "workflow-orchestrator-complex",
+      renderedGraph: {
+        graph: {
+          steps: [
+            { type: "pattern_work_list" }
+          ]
+        }
+      },
+      agentflow: { passed: true },
+      direct: {
+        exit_code: 0,
+        workspace_result: { passed: true }
+      }
+    });
+    const verdict = grader.buildParityVerdict({
+      outputDir: tempRoot,
+      direct: {
+        exit_code: 0,
+        workspace_result: { passed: true }
+      },
+      agentflow: {
+        passed: true,
+        checks: {
+          out_of_scope_changes: [],
+          forbidden_changes: []
+        }
+      },
+      pairwiseJudge: {
+        parsed: {
+          preferred_candidate: "B",
+          scores: { A: 4, B: 5 }
+        }
+      },
+      mapping: {
+        A: "agentflow",
+        B: "direct-codex"
+      },
+      patternDiagnostics
+    });
+
+    expect(patternDiagnostics.work_list_for_coherent_task).toBe(true);
+    expect(patternDiagnostics.work_list_misfit).toBe(false);
+    expect(verdict.blockers).toContain("Direct Codex won while Agentflow used pattern_work_list for a coherent implementation task; classify this as pattern-fit failure before worker-quality failure.");
   });
 
   it("matches simple oracle globs for forbidden test edits", async () => {

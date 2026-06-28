@@ -4,12 +4,28 @@ Use this before assembling graph JSON. Agentflow graph prose is not all the same
 
 Rule: authoring rationale belongs outside graph JSON; runtime-facing fields must speak only to the executing agent, verifier, researcher, planner, item worker, or reviewer.
 
+Rule: graph-construction semantics never belong in prompt-facing graph fields. Do not explain why the author chose Agentflow, a node type, a managed pattern, a publisher, or a downstream handoff inside runtime prose. Those decisions belong in the authoring plan, review notes, or PR text, not in Graph JSON.
+
 ## Authoring Flow
 
 1. Write an authoring plan outside the graph: topology, pattern choice, dependencies, assurance profile, and rationale.
 2. Write a runtime prose table: field path, runtime audience, exact field text, and evidence it should produce.
 3. Assemble JSON only after every prompt-facing field is free of graph-construction language.
 4. Run `agentflow validate --graph <path>` and inspect `authoring_review` findings.
+
+## Graph-Semantics Leak Review
+
+Before writing JSON, read every prompt-facing field as if an LLM worker will see it without the authoring conversation. Remove:
+
+- graph topology narration;
+- node ids, node ordering, or downstream-node mechanics;
+- managed-pattern lifecycle explanation;
+- publisher/private-artifact/public-artifact mechanics unless they are the user's actual product terms;
+- `af` command instructions unless the graph is specifically teaching Agentflow operation;
+- authoring rationale such as "we use this pattern because...";
+- review notes about how the graph should compile.
+
+Replace leaked semantics with the runtime reader's actual contract: outcome, evidence, authority boundary, context reason, artifact meaning, or rubric standard.
 
 ## Field Taxonomy
 

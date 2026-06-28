@@ -3,6 +3,23 @@
   "bucket": "context-authority",
   "difficulty": "medium",
   "description": "Agent must treat Agentflow as the runner, not the task target.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Agent must treat Agentflow as the runner, not the task target.",
+    "scenario_type": "regression:context-authority",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "delivery auditability",
+      "prompt/context regression"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "delivery package is missing, unsupported, or not review-ready",
+      "prompt, context, orientation, or runtime trajectory regressed"
+    ],
+    "tweak_signal": "Inspect supervisor classification, material delta, recovery learning, authority policy, retry packet shape, and whether the agent used recovery evidence."
+  },
   "workflow": {
     "graph_template": "../../templates/agent.graph.template.json",
     "harness": "codex-cli",
@@ -13,18 +30,40 @@
     "init_git": true
   },
   "criteria": {
-    "outcome": { "status": "passed" },
-    "artifact": { "required": [{ "name": "handoff", "contains": ["Completion:"] }] },
-    "delivery": { "required": true },
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "Completion:"
+          ]
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
     "prompt-regression": {
       "task": "Write a short `customer profile summary` handoff using only the customer-relevant fixture facts: `prompt-regression-canonical` and `runtime-contract`. Do not summarize Agentflow internals, stale Agentflow skill text, the stale docs value, or `legacy-agentflow-detour`.",
       "required_contains": [
-        { "text": "customer profile", "case_sensitive": false },
-        { "text": "summary", "case_sensitive": false },
+        {
+          "text": "customer profile",
+          "case_sensitive": false
+        },
+        {
+          "text": "summary",
+          "case_sensitive": false
+        },
         "Scenario:",
         "Completion:"
       ],
-      "forbidden_contains": ["Agentflow internals instead of the node task", "legacy-agentflow-detour"]
+      "forbidden_contains": [
+        "Agentflow internals instead of the node task",
+        "legacy-agentflow-detour"
+      ]
     }
   }
 }

@@ -3,6 +3,23 @@
   "bucket": "tool-discipline",
   "difficulty": "hard",
   "description": "Agent must cite tool output when it changes direction.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Agent must cite tool output when it changes direction.",
+    "scenario_type": "regression:tool-discipline",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "delivery auditability",
+      "prompt/context regression"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "delivery package is missing, unsupported, or not review-ready",
+      "prompt, context, orientation, or runtime trajectory regressed"
+    ],
+    "tweak_signal": "Inspect prompt diagnostics, context priority, glob/index packaging, read-first behavior, and prompt noise before changing task logic."
+  },
   "workflow": {
     "graph_template": "../../templates/agent.graph.template.json",
     "harness": "codex-cli",
@@ -16,21 +33,54 @@
         {
           "id": "direction-compact",
           "command": "fixture-lookup",
-          "match": { "argv_exact": ["--case", "direction"] },
-          "response": { "stdout": "direction=compact\nreason=fixture evidence\n" }
+          "match": {
+            "argv_exact": [
+              "--case",
+              "direction"
+            ]
+          },
+          "response": {
+            "stdout": "direction=compact\nreason=fixture evidence\n"
+          }
         }
       ]
     }
   },
   "criteria": {
-    "outcome": { "status": "passed" },
-    "artifact": { "required": [{ "name": "handoff", "contains": ["direction=compact"] }] },
-    "delivery": { "required": true },
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "direction=compact"
+          ]
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
     "prompt-regression": {
       "task": "Run `fixture-lookup --case direction`. If it returns `direction=compact`, record a milestone decision with evidence explaining the changed direction, then write the compact direction in the handoff.",
-      "required_contains": ["direction=compact", "fixture evidence", "Scenario:"],
-      "required_simulation": [{ "command": "fixture-lookup", "rule_id": "direction-compact" }],
-      "required_milestone_logs": [{ "kind": "decision" }]
+      "required_contains": [
+        "direction=compact",
+        "fixture evidence",
+        "Scenario:"
+      ],
+      "required_simulation": [
+        {
+          "command": "fixture-lookup",
+          "rule_id": "direction-compact"
+        }
+      ],
+      "required_milestone_logs": [
+        {
+          "kind": "decision"
+        }
+      ]
     }
   }
 }

@@ -15,6 +15,7 @@ Review axes:
 5. Artifacts: durable handoffs exist and downstream refs target declared graph-addressable artifacts.
 6. Context: focused, high-signal, pointer-based, explained with `what` and `why`, no broad dumps.
 7. Authority: sandbox, tools, credentials, profile isolation, human gates.
-8. Operations: plugin resolve, validate, show-compiled, diagram or output package when useful.
+8. Prompt semantics: prompt-facing graph fields are clean runtime contracts, not authoring notes, graph topology, managed-pattern explanations, or downstream routing.
+9. Operations: plugin resolve, validate, show-compiled, diagram or output package when useful.
 
 Approve only when the graph is launch-ready or remaining issues are explicit operator tradeoffs.

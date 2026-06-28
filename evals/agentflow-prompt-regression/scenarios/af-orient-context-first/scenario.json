@@ -3,6 +3,23 @@
   "bucket": "runtime-cli-discipline",
   "difficulty": "medium",
   "description": "Ambiguous node should orient with af orient and context pointers before broad search.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Ambiguous node should orient with af orient and context pointers before broad search.",
+    "scenario_type": "regression:runtime-cli-discipline",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "delivery auditability",
+      "prompt/context regression"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "delivery package is missing, unsupported, or not review-ready",
+      "prompt, context, orientation, or runtime trajectory regressed"
+    ],
+    "tweak_signal": "Inspect prompt diagnostics, context priority, glob/index packaging, read-first behavior, and prompt noise before changing task logic."
+  },
   "workflow": {
     "graph_template": "../../templates/agent.graph.template.json",
     "harness": "codex-cli",
@@ -13,13 +30,34 @@
     "init_git": true
   },
   "criteria": {
-    "outcome": { "status": "passed" },
-    "artifact": { "required": [{ "name": "handoff", "contains": ["context-first"] }] },
-    "delivery": { "required": true },
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "context-first"
+          ]
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
     "prompt-regression": {
       "task": "This task has intentionally ambiguous local docs. Run `af orient`, inspect the context pointer evidence it names, then write a handoff that says `context-first` and explains the context pointer evidence used.",
-      "required_contains": ["context-first", "Scenario:", "Evidence:"],
-      "required_af": ["orient", "milestone add", "complete check"]
+      "required_contains": [
+        "context-first",
+        "Scenario:",
+        "Evidence:"
+      ],
+      "required_af": [
+        "orient",
+        "milestone add",
+        "complete check"
+      ]
     }
   }
 }

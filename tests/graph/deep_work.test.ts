@@ -1,8 +1,15 @@
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+
 import { describe, expect, it } from "vitest";
 import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import { withNodeIntentDefaults } from "../helpers/graph.js";
+const execFileAsync = promisify(execFile);
 const TEST_INTENT = {
     goal: "Perform accountable implementation work until it is validated.",
     acceptance_criteria: ["The managed pattern loops on completion criteria and publishes public artifacts."]
@@ -51,8 +58,8 @@ function buildPatternStep(stepOverrides = {}) {
                 {
                     id: "handoff_quality",
                     kind: "rubric",
-                    target: "artifact:summary",
-                    rubric: "The summary clearly describes changes, validation evidence, and residual risks.",
+                    target: "artifact:validation_log",
+                    rubric: "The validation log clearly describes changes, validation evidence, and residual risks.",
                     weight: 0.2
                 }
             ]
@@ -148,15 +155,22 @@ describe("pattern deep work", () => {
                 phase: "plan"
             }),
             artifacts: expect.objectContaining({
-                cycle_plan: expect.objectContaining({ path: "cycle-plan.md" })
+                plan: expect.objectContaining({ path: "plan.md" })
             })
         }));
-        expect(planPrompt).toContain("implementation planner");
+        expect(planPrompt).toContain("planning execution work to satisfy the full task from the current state");
         expect(planPrompt).toContain("Do not edit files in this phase.");
         expect(planPrompt).toContain("treat that as expected first-cycle state");
         expect(planPrompt).toContain("Use the provided context pointers for the planning phase.");
+        expect(planPrompt).toContain("Plan the work needed to satisfy the full task from the current state.");
+        expect(planPrompt).toContain("Use prior feedback, scorecards, and failed criteria as gap evidence; do not shrink the task to only the last failed check.");
         expect(planPrompt).toContain("Preserve exact task-specific names, labels, commands, and required phrases from the task contract in the plan.");
-        expect(planPrompt).toContain("The `cycle_plan` artifact is the durable planning record; do not create a milestone solely to restate the plan.");
+        expect(planPrompt).toContain("Use `af artifact write plan` to publish the plan content.");
+        expect(planPrompt).toContain("Do not create or edit workspace files during this planning phase.");
+        expect(planPrompt).not.toContain("Write it to `plan.md` as an executor handoff, not as the final deliverable.");
+        expect(planPrompt).not.toContain("smallest credible next plan");
+        expect(planPrompt).not.toContain("cycle_plan");
+        expect(planPrompt).not.toContain("cycle-plan.md");
         expect(planPrompt).not.toContain("managed workflow");
         expect(planPrompt).not.toContain("public artifact");
         expect(planPrompt).not.toContain("private working material");
@@ -170,17 +184,24 @@ describe("pattern deep work", () => {
             id: "implement_checkout__managed__pattern_deep_work__generate_validate",
             artifacts: expect.objectContaining({
                 work_notes: expect.objectContaining({ path: "work-notes.md" }),
-                draft_summary: expect.objectContaining({ path: "draft-summary.md" }),
-                draft_packet: expect.objectContaining({ path: "draft-packet.json" })
+                draft_validation_log: expect.objectContaining({ path: "draft-validation_log.md" })
             })
         }));
-        expect(generateValidatePrompt).toContain("implementation agent responsible for completing and validating this work cycle");
+        expect(generateValidateNode.artifacts).not.toHaveProperty("draft_summary");
+        expect(generateValidateNode.artifacts).not.toHaveProperty("draft_packet");
+        expect(generateValidatePrompt).toContain("responsible for satisfying the full task from the current state");
+        expect(generateValidatePrompt).toContain("Use `plan.md` as guidance, not as a limit.");
+        expect(generateValidatePrompt).toContain("The task contract controls when `plan.md` is incomplete, stale, too small, or contradicted by repository evidence.");
         expect(generateValidatePrompt).toContain("Satisfy the task contract, not only the visible tests");
         expect(generateValidatePrompt).toContain("add/edit tests only when the task asks or repo contract expects them");
-        expect(generateValidatePrompt).toContain("Preserve API semantics with nullish or explicit checks");
-        expect(generateValidatePrompt).toContain("round money with integer cents or Number.EPSILON");
+        expect(generateValidatePrompt).not.toContain("Follow the cycle plan");
+        expect(generateValidatePrompt).not.toContain("smallest justified deviation");
+        expect(generateValidatePrompt).not.toContain("Preserve API semantics with nullish or explicit checks");
+        expect(generateValidatePrompt).not.toContain("round money with integer cents or Number.EPSILON");
         expect(generateValidatePrompt).toContain("cite concrete evidence names, paths, commands, or packet fields");
-        expect(generateValidatePrompt).toContain("Draft handoffs and summaries should include enough evidence citations");
+        expect(generateValidatePrompt).toContain("Draft final artifacts should include enough evidence citations");
+        expect(generateValidatePrompt).toContain("Use `af artifact write work_notes` to publish the work notes.");
+        expect(generateValidatePrompt).toContain("Use `af artifact write draft_validation_log` to publish the draft for final artifact validation_log.");
         expect(generateValidatePrompt).not.toContain("managed workflow");
         expect(generateValidatePrompt).not.toContain("public artifact");
         expect(generateValidatePrompt).not.toContain("private working material");
@@ -207,7 +228,16 @@ describe("pattern deep work", () => {
             type: "check",
             check_kind: "ai",
             on_failure: "continue",
-            id: "implement_checkout__managed__pattern_deep_work__criterion_02_acceptance_rubric"
+            id: "implement_checkout__managed__pattern_deep_work__criterion_02_acceptance_rubric",
+            managed_runtime: expect.objectContaining({
+                kind: "pattern_deep_work",
+                root_id: "implement_checkout",
+                phase: "verify",
+                config: expect.objectContaining({
+                    criterion_id: "acceptance_rubric",
+                    target: "workspace"
+                })
+            })
         }));
         expect(JSON.stringify(criteriaPanel.steps[1])).toContain("evaluator for completion criterion `acceptance_rubric`");
         expect(JSON.stringify(criteriaPanel.steps[1])).not.toContain("fair");
@@ -219,7 +249,7 @@ describe("pattern deep work", () => {
             support: expect.objectContaining({
                 context: [
                     expect.objectContaining({ name: "work_notes" }),
-                    expect.objectContaining({ name: "draft_summary" })
+                    expect.objectContaining({ name: "draft_validation_log" })
                 ]
             })
         }));
@@ -234,26 +264,26 @@ describe("pattern deep work", () => {
         }));
         expect(finalNode).toEqual(expect.objectContaining({
             id: "implement_checkout",
-            type: "agent",
+            type: "exec",
+            command: "node",
             artifacts: expect.objectContaining({
-                summary: expect.objectContaining({ path: "summary.md" }),
                 packet: expect.objectContaining({ path: "packet.json" }),
                 validation_log: expect.objectContaining({ path: "validation-log.md" })
             }),
             intent: expect.objectContaining({
                 acceptance_criteria: expect.arrayContaining([
-                    "The final artifacts are consistent with the latest passing completion scorecard and do not claim unsupported success."
+                    "The runtime-owned packet records the latest passing completion scorecard, work notes, and promoted artifact references."
                 ])
             })
         }));
+        expect(finalNode.artifacts).not.toHaveProperty("summary");
         const finalPrompt = JSON.stringify(finalNode);
         expect(finalPrompt).not.toContain("managed workflow");
         expect(finalPrompt).not.toContain("public artifacts");
         expect(finalPrompt).not.toContain("Downstream work will read only");
-        expect(JSON.stringify(finalNode)).toContain("publishing the final artifacts from the latest passing work cycle");
-        expect(JSON.stringify(finalNode)).toContain("scorecard evidence or completion scorecard section");
-        expect(JSON.stringify(finalNode)).toContain("When a final artifact description names literal labels or fields");
-        expect(JSON.stringify(finalNode)).toContain("score, threshold, criterion results, validation command/result, and evidence paths");
+        expect(JSON.stringify(finalNode)).toContain("Finalize the latest passing deep-work result");
+        expect(JSON.stringify(finalNode)).toContain("runtime-owned packet");
+        expect(JSON.stringify(finalNode)).toContain("copied from accepted drafts without LLM rewriting");
     });
     it("compiles pattern_deep_work so downstream nodes depend on the final published artifacts", () => {
         const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([
@@ -277,13 +307,6 @@ describe("pattern deep work", () => {
                             name: "work_agent_response",
                             what: "Final agent response from the managed deep-work node.",
                             why: "The handoff must summarize the implementation result."
-                        },
-                        {
-                            kind: "artifact",
-                            ref: "implement_checkout.summary",
-                            name: "work_summary",
-                            what: "Final public summary from the managed deep-work node.",
-                            why: "The handoff must cite the managed summary."
                         },
                         {
                             kind: "artifact",
@@ -312,13 +335,152 @@ describe("pattern deep work", () => {
             "root__implement_checkout__managed__pattern_deep_work__workflow__implement_checkout"
         ]);
         expect(finalWorkNode).toEqual(expect.objectContaining({
-            kind: "agent",
+            kind: "exec",
             lowered_from: "pattern_deep_work",
             compiled_id: "root__implement_checkout__managed__pattern_deep_work__workflow__implement_checkout"
         }));
         expect(handoffNode).toEqual(expect.objectContaining({
             deps: ["root__implement_checkout__managed__pattern_deep_work__workflow__implement_checkout"]
         }));
+    });
+
+    it("blocks a required criterion below threshold even when the evaluator marked it passed", async () => {
+        const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([
+            buildPatternStep({
+                completion: {
+                    max_cycles: 1,
+                    pass_threshold: 0.9,
+                    criteria: [
+                        {
+                            id: "semantic_quality",
+                            kind: "rubric",
+                            target: "workspace",
+                            rubric: "The implementation satisfies the semantic quality bar.",
+                            weight: 1,
+                            required: true
+                        }
+                    ]
+                }
+            })
+        ])));
+        const root = normalized.document?.graph;
+        if (!root || root.type !== "sequence") {
+            throw new Error("Expected normalized graph root to be a sequence.");
+        }
+        const workflow = root.steps[0];
+        if (!workflow || workflow.type !== "sequence") {
+            throw new Error("Expected pattern_deep_work to lower into a workflow sequence.");
+        }
+        const loop = workflow.steps[0];
+        if (!loop || loop.type !== "repeat" || loop.body.type !== "sequence") {
+            throw new Error("Expected deep work loop body.");
+        }
+        const gateNode = loop.body.steps[3];
+        if (!gateNode || gateNode.type !== "check" || gateNode.check_kind !== "deterministic") {
+            throw new Error("Expected deterministic completion gate.");
+        }
+
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-deep-work-gate-"));
+        const criterionPath = join(tempRoot, "criterion.json");
+        await writeFile(criterionPath, JSON.stringify({
+            passed: true,
+            score: 0.86,
+            summary: "Evaluator considered the criterion adequate, but score is below threshold.",
+            issues: []
+        }), "utf8");
+
+        const script = gateNode.args?.[1];
+        if (!script) {
+            throw new Error("Expected gate node script.");
+        }
+
+        await execFileAsync(process.execPath, ["-e", script], {
+            env: {
+                ...process.env,
+                AGENTFLOW_OUTPUT_DIR: tempRoot,
+                AGENTFLOW_CONTEXT_CRITERION_01_RESULT: criterionPath
+            }
+        });
+
+        const scorecard = JSON.parse(await readFile(join(tempRoot, "scorecard.json"), "utf8")) as {
+            passed: boolean;
+            blockers: Array<{ criterion_id: string; summary: string }>;
+            criteria: Array<{ passed: boolean; evaluator_passed?: boolean; score: number; summary: string }>;
+        };
+        expect(scorecard.passed).toBe(false);
+        expect(scorecard.blockers).toEqual([
+            expect.objectContaining({
+                criterion_id: "semantic_quality",
+                summary: expect.stringContaining("below the pass threshold 0.90")
+            })
+        ]);
+        expect(scorecard.criteria[0]).toEqual(expect.objectContaining({
+            passed: false,
+            evaluator_passed: true,
+            score: 0.86
+        }));
+    });
+    it("finalizes runtime packet and promotes accepted user-authored drafts without an LLM publisher", async () => {
+        const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([buildPatternStep()])));
+        const root = normalized.document?.graph;
+        if (!root || root.type !== "sequence") {
+            throw new Error("Expected normalized graph root to be a sequence.");
+        }
+        const workflow = root.steps[0];
+        if (!workflow || workflow.type !== "sequence") {
+            throw new Error("Expected pattern_deep_work to lower into a workflow sequence.");
+        }
+        const finalNode = workflow.steps[1];
+        if (!finalNode || finalNode.type !== "exec") {
+            throw new Error("Expected deterministic deep-work finalizer.");
+        }
+
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-deep-work-finalizer-"));
+        const scorecardPath = join(tempRoot, "scorecard.json");
+        const workNotesPath = join(tempRoot, "work-notes.md");
+        const draftPath = join(tempRoot, "draft-validation_log.md");
+        await writeFile(scorecardPath, JSON.stringify({
+            passed: true,
+            total_score: 1,
+            pass_threshold: 0.85,
+            criteria: []
+        }), "utf8");
+        await writeFile(workNotesPath, "Validated the accepted candidate.\n", "utf8");
+        await writeFile(draftPath, "Accepted validation draft.\n", "utf8");
+
+        const script = finalNode.args?.[1];
+        if (!script) {
+            throw new Error("Expected finalizer script.");
+        }
+        await execFileAsync(process.execPath, ["-e", script], {
+            env: {
+                ...process.env,
+                AGENTFLOW_OUTPUT_DIR: tempRoot,
+                AGENTFLOW_WORKSPACE: tempRoot,
+                AGENTFLOW_CONTEXT_COMPLETION_SCORECARD: scorecardPath,
+                AGENTFLOW_CONTEXT_WORK_NOTES: workNotesPath,
+                AGENTFLOW_CONTEXT_DRAFT_VALIDATION_LOG: draftPath
+            }
+        });
+
+        expect(await readFile(join(tempRoot, "validation-log.md"), "utf8")).toBe("Accepted validation draft.\n");
+        const packet = JSON.parse(await readFile(join(tempRoot, "packet.json"), "utf8")) as {
+            status: string;
+            completion_scorecard_path: string;
+            work_notes_path: string;
+            final_artifacts: Array<{ name: string; source_draft_path: string }>;
+        };
+        expect(packet).toEqual(expect.objectContaining({
+            status: "completed",
+            completion_scorecard_path: scorecardPath,
+            work_notes_path: workNotesPath
+        }));
+        expect(packet.final_artifacts).toEqual([
+            expect.objectContaining({
+                name: "validation_log",
+                source_draft_path: draftPath
+            })
+        ]);
     });
     it("compiles phase-specific deep-work controls into distinct prompt-backed phases", () => {
         const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([
@@ -327,7 +489,7 @@ describe("pattern deep work", () => {
                     plan: {
                         intent: {
                             goal: "Plan from current scorecard only; do not design unrelated architecture.",
-                            acceptance_criteria: ["Name the smallest credible validation command."],
+                            acceptance_criteria: ["Name the strongest focused validation command."],
                             constraints: ["Do not prescribe broad rewrites."]
                         },
                         support: {
@@ -387,7 +549,7 @@ describe("pattern deep work", () => {
         }
         expect(JSON.stringify(planNode)).toContain("Phase Contract");
         expect(JSON.stringify(planNode)).toContain("Plan from current scorecard only");
-        expect(JSON.stringify(planNode)).toContain("Name the smallest credible validation command");
+        expect(JSON.stringify(planNode)).toContain("Name the strongest focused validation command");
         expect(JSON.stringify(planNode)).toContain("Do not prescribe broad rewrites");
         expect(JSON.stringify(planNode)).toContain("Focused checkout validation command");
         expect(planNode).toEqual(expect.objectContaining({ model: "gpt-5-planner" }));
@@ -402,9 +564,7 @@ describe("pattern deep work", () => {
         expect(generateNode).toEqual(expect.objectContaining({ sandbox: "workspace-write" }));
         expect(JSON.stringify(criteriaPanel.steps[1])).toContain("Judge evidence, not intentions");
         expect(JSON.stringify(criteriaPanel.steps[1])).toContain("Penalize missing validation evidence");
-        expect(JSON.stringify(finalNode)).toContain("Publish only claims supported by the passing scorecard");
         expect(JSON.stringify(finalNode)).toContain("Keep downstream handoff bounded to accepted evidence");
-        expect(JSON.stringify(finalNode)).toContain("Implement checkout rounding and publish a clear handoff.");
     });
     it("rejects removed deep-work stage fields", () => {
         const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([

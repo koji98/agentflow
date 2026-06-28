@@ -223,11 +223,14 @@ describe("af runtime CLI", () => {
         const orient = await executeAfCli(["orient"]);
         expect(orient.exitCode).toBe(0);
         expect(orient.stdout).toContain("# Agentflow Orientation");
-        expect(orient.stdout).toContain("## Success Contract");
-        expect(orient.stdout).toContain("| `handoff` | `af artifact write handoff` | auto-detect | Durable handoff. |");
+        expect(orient.stdout).toContain("Orientation mode: `startup_restore`");
+        expect(orient.stdout).toContain("No recovery, blockers, or prior progress are active.");
+        expect(orient.stdout).toContain("Do the task from the prompt. Record real progress and validation as you work, then run `af complete check` before final response.");
+        expect(orient.stdout).not.toContain("## Success Contract");
+        expect(orient.stdout).not.toContain("| `handoff` | `af artifact write handoff` | auto-detect | Durable handoff. |");
         expect(orient.stdout).not.toContain(runtime.output);
         expect(orient.stdout).not.toContain("Destination");
-        expect(orient.stdout).toContain("## Milestones");
+        expect(orient.stdout).not.toContain("## Milestones");
         const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
         try {
             await expect(runAfCli(["orient"])).resolves.toBe(0);
@@ -241,6 +244,13 @@ describe("af runtime CLI", () => {
             command: "af complete check",
             completion_status: "incomplete",
             missing_artifacts: ["handoff"]
+        }));
+        expect(incomplete.output).toEqual(expect.objectContaining({
+            orientation: expect.objectContaining({
+                orient_called: true,
+                orient_call_count: 1,
+                modes_seen: ["startup_restore"]
+            })
         }));
         expect(JSON.stringify(incomplete.output)).not.toContain("expected_path");
         expect(JSON.stringify(incomplete.output)).not.toContain("packet_path");
@@ -380,6 +390,21 @@ describe("af runtime CLI", () => {
                 exitCode: 2,
                 stdout: expect.stringContaining("not allowed by the worker command policy")
             });
+        await expect(executeAfCli(["spawn", "--help"]))
+            .resolves.toMatchObject({
+                exitCode: 2,
+                stdout: expect.stringContaining("not allowed by the worker command policy")
+            });
+        await expect(executeAfCli(["diagnose", "--help"]))
+            .resolves.toMatchObject({
+                exitCode: 2,
+                stdout: expect.stringContaining("not allowed by the worker command policy")
+            });
+        await expect(executeAfCli(["learn", "--help"]))
+            .resolves.toMatchObject({
+                exitCode: 2,
+                stdout: expect.stringContaining("not allowed by the worker command policy")
+            });
         await expect(executeAfCli([
             "_helper-run",
             "--metadata",
@@ -390,6 +415,100 @@ describe("af runtime CLI", () => {
             exitCode: 2,
             stdout: expect.stringContaining("_helper-run is internal Agentflow runtime transport")
         });
+    });
+    it("renders exact next commands for active milestones in orientation and completion output", async () => {
+        const runtime = await createRuntime(tempRoot, {});
+        process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
+        const added = outputOf<{
+            milestone: { id: string };
+        }>(await executeAfCli([
+            "milestone",
+            "add",
+            "--title",
+            "Validate behavior",
+            "--goal",
+            "Run the targeted tests and record evidence"
+        ]));
+        expect(added.milestone.id).toBe("m1");
+        const orient = await executeAfCli(["orient"]);
+        expect(orient.exitCode).toBe(0);
+        expect(orient.stdout).toContain("## Milestone Next Actions");
+        expect(orient.stdout).toContain("`af milestone complete m1 --evidence <text>`");
+        expect(orient.stdout).toContain("`af milestone block m1 --blocked-on <text> --recoverable-by <text> --evidence <text>`");
+        const check = await executeAfCli(["complete", "check"]);
+        expect(check.exitCode).toBe(1);
+        expect(check.output).toEqual(expect.objectContaining({
+            next_actions: expect.arrayContaining([
+                "Complete active milestone m1 with `af milestone complete m1 --evidence <text>` or block it with `af milestone block m1 --blocked-on <text> --recoverable-by <text> --evidence <text>`."
+            ])
+        }));
+    });
+    it("renders full refresh orientation after a prior successful orient call", async () => {
+        const runtime = await createRuntime(tempRoot);
+        await writeFile(runtime.toolInvocations, `${JSON.stringify({
+            ts: "2026-05-03T12:00:10.000Z",
+            execution_id: "agent-main",
+            kind: "af",
+            tool: "af",
+            argv: ["orient"],
+            exit_code: 0,
+            orientation_mode: "startup_restore",
+            output_path: join(dirname(runtime.toolInvocations), "0001-output.json")
+        })}\n`, "utf8");
+        process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
+        const orient = await executeAfCli(["orient"]);
+        expect(orient.exitCode).toBe(0);
+        expect(orient.stdout).toContain("Orientation mode: `refresh_full`");
+        expect(orient.stdout).toContain("## Success Contract");
+        expect(orient.stdout).toContain("## Context Pointers");
+        expect(orient.stdout).toContain("## Milestones");
+    });
+    it("summarizes priority context in refresh orientation without dumping glob matches", async () => {
+        const runtime = await createRuntime(tempRoot);
+        await writeFile(runtime.contextManifest, [
+            "# Context Manifest",
+            "",
+            "Context entries are pointers. Agentflow does not copy or truncate source context into this prompt package.",
+            "",
+            "Open read-first pointers before broad search unless the task clearly requires discovery. Use reference sets as search spaces, not as linear reading lists.",
+            "",
+            "## Read First",
+            "",
+            "| Name | Kind | Pointer | Why first |",
+            "| --- | --- | --- | --- |",
+            "| `recovery_case` | `runtime_supervisor_recovery` | `agent/supervisor-recovery.md` | Retry guidance. |",
+            "",
+            "## Reference Sets",
+            "",
+            "Broad file sets. Use these as indexes/search spaces; do not read every file linearly unless the task requires it.",
+            "",
+            "| Name | Kind | Pointer | Matches | How to use |",
+            "| --- | --- | --- | --- | --- |",
+            "| `docs` | `workspace_glob` | `runtime/globs/docs.md` | 2 of 5 | Search selectively. |",
+            "",
+            "docs/a.md",
+            "docs/b.md",
+            ""
+        ].join("\n"), "utf8");
+        await writeFile(runtime.toolInvocations, `${JSON.stringify({
+            ts: "2026-05-03T12:00:10.000Z",
+            execution_id: "agent-main",
+            kind: "af",
+            tool: "af",
+            argv: ["orient"],
+            exit_code: 0,
+            orientation_mode: "startup_restore",
+            output_path: join(dirname(runtime.toolInvocations), "0001-output.json")
+        })}\n`, "utf8");
+        process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
+        const orient = await executeAfCli(["orient"]);
+        expect(orient.exitCode).toBe(0);
+        expect(orient.stdout).toContain("## Context Summary");
+        expect(orient.stdout).toContain("- Read first: `recovery_case`");
+        expect(orient.stdout).toContain("- Reference sets: `docs` (2 of 5)");
+        expect(orient.stdout).toContain("Use reference sets as search spaces, not as linear reading lists.");
+        expect(orient.stdout).not.toContain("docs/a.md");
+        expect(orient.stdout).not.toContain("docs/b.md");
     });
     it("shows active managed contract failures in orient without raw debug noise", async () => {
         const runtime = await createRuntime(tempRoot);
@@ -748,7 +867,9 @@ describe("af runtime CLI", () => {
         process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
         const orient = await executeAfCli(["orient"]);
         expect(orient.exitCode).toBe(0);
+        expect(orient.stdout).toContain("Orientation mode: `recovery_focus`");
         expect(orient.stdout).toContain("## Retry Orientation");
+        expect(orient.stdout).toContain("This is a retry. The original task contract is unchanged.");
         expect(orient.stdout).toContain("Missing declared handoff artifact.");
         expect(orient.stdout).toContain("repair_artifacts");
         expect(orient.stdout).toContain("artifact_repair");
@@ -759,6 +880,13 @@ describe("af runtime CLI", () => {
         expect(orient.stdout).toContain("Repair the missing handoff artifact, then rerun completion.");
         expect(orient.stdout).toContain("Do not rerun the entire implementation from scratch.");
         expect(orient.stdout).toContain("## Prior Attempt Memory");
+        expect(orient.stdout.indexOf("### Prior Failure")).toBeLessThan(orient.stdout.indexOf("### What Changed"));
+        expect(orient.stdout.indexOf("### What Changed")).toBeLessThan(orient.stdout.indexOf("### Do Next"));
+        expect(orient.stdout.indexOf("### Do Next")).toBeLessThan(orient.stdout.indexOf("### Read First"));
+        expect(orient.stdout.indexOf("### Read First")).toBeLessThan(orient.stdout.indexOf("### Preserve"));
+        expect(orient.stdout.indexOf("### Preserve")).toBeLessThan(orient.stdout.indexOf("### Discard / Do Not Redo"));
+        expect(orient.stdout.indexOf("### Discard / Do Not Redo")).toBeLessThan(orient.stdout.indexOf("### Validation Before Completion"));
+        expect(orient.stdout.indexOf("### Audit Metadata")).toBeLessThan(orient.stdout.indexOf("## Prior Attempt Memory"));
         expect(orient.stdout).toContain("m1: Implemented feature");
         expect(orient.stdout).toContain("npm test");
         expect(orient.stdout).not.toContain("human-debug");
@@ -1148,6 +1276,7 @@ describe("af runtime CLI", () => {
             expect.objectContaining({
                 kind: "af",
                 argv: ["orient"],
+                orientation_mode: "startup_restore",
                 output_path: expect.stringContaining("human-debug/tools/0001-output.json")
             })
         ]);
@@ -1198,8 +1327,10 @@ describe("af runtime CLI", () => {
         expect(spawned.agent.sandbox).toBe("read-only");
         expect(spawned.agent.input_case_file).toBe(join(runtime.root, "case-file.json"));
         await expect(readFile(spawned.artifact, "utf8")).resolves.toContain("helper ok");
-        await expect(readFile(spawned.agent.prompt_path!, "utf8")).resolves.toContain("evidence mapper");
-        await expect(readFile(spawned.agent.prompt_path!, "utf8")).resolves.toContain("Do not request human pause or approval");
+        const helperPrompt = await readFile(spawned.agent.prompt_path!, "utf8");
+        expect(helperPrompt).toContain("evidence mapper");
+        expect(helperPrompt).toContain("Do not request human pause or approval");
+        expect(helperPrompt).toContain("Before the final response: run `af orient`, complete every helper milestone, publish the required artifact with `af artifact write helper-report.md`, then run `af complete check`.");
     });
     it.each([
         ["evidence_mapper", "investigation", "evidence mapper"],

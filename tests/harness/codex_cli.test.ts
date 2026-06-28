@@ -321,9 +321,9 @@ describe("codex cli harness", () => {
       expect(prompt).not.toContain(outputDir);
       expect(prompt).toContain("Sandbox: workspace-write");
       expect(prompt).toContain("## Declared Artifacts");
-      expect(prompt).toContain("Declared names/descriptions are binding");
+      expect(prompt).toContain("Names/descriptions are binding");
       expect(prompt).toContain("| `handoff` |");
-      expect(prompt).toContain("| `handoff` | auto-detect |");
+      expect(prompt).toContain("| `handoff` | `af artifact write handoff` | auto-detect |");
       expect(prompt).not.toContain("$AGENTFLOW_OUTPUT_DIR/handoff.md");
       expect(prompt).toContain("Markdown handoff for downstream nodes.");
       expect(prompt).toContain("| `junit` |");

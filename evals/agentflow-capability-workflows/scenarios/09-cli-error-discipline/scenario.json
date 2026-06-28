@@ -3,6 +3,30 @@
   "bucket": "valid-hard-execution",
   "difficulty": "medium",
   "description": "Improve CLI invalid-input behavior with actionable errors.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Improve CLI invalid-input behavior with actionable errors.",
+    "scenario_type": "capability:valid-hard-execution",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "workspace scope",
+      "supervisor recovery",
+      "delivery auditability",
+      "custom deterministic checks",
+      "scenario-specific checks",
+      "quality rubric"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "workspace changes are missing, forbidden, or out of scope",
+      "expected supervisor recovery, learning, or authority behavior is missing",
+      "delivery package is missing, unsupported, or not review-ready",
+      "scenario-specific deterministic or quality criterion failed",
+      "quality rubric finds weak evidence, scope control, or handoff quality"
+    ],
+    "tweak_signal": "Inspect supervisor classification, material delta, recovery learning, authority policy, retry packet shape, and whether the agent used recovery evidence."
+  },
   "workflow": {
     "graph_template": "../../templates/agent-change.graph.template.json",
     "harness": "codex-cli",

@@ -5,6 +5,7 @@ import type {
   BaseExecutableNode,
   CheckNode,
   ContextItem,
+  ManagedPromptContract,
   NodeRuntimeSelection,
   NodeSupport
 } from "../graph/authored.js";
@@ -27,6 +28,21 @@ export type ManagedPatternExecutableConfig = BaseExecutableNode & ManagedPattern
 export interface PromptSection {
   title?: string;
   lines: string[];
+}
+
+export function managedPromptContract(
+  phase: string,
+  task: string,
+  sections: PromptSection[]
+): ManagedPromptContract {
+  return {
+    phase,
+    task,
+    sections: sections.map((entry, index) => ({
+      title: entry.title ?? (index === 0 ? "Task" : "Details"),
+      lines: entry.lines
+    }))
+  };
 }
 
 export function managedId(rootId: string, kind: string, suffix: string): string {
@@ -146,10 +162,7 @@ function defaultArtifactDescription(name: string, path: string): string {
 }
 
 export function defaultManagedPublicArtifacts(): Record<string, ArtifactDefinition> {
-  return mergeArtifacts(
-    outputDirArtifact("summary", "summary.md", "Human-readable final summary."),
-    outputDirArtifact("packet", "packet.json", "Machine-readable final evidence packet.")
-  );
+  return outputDirArtifact("packet", "packet.json", "Machine-readable final evidence packet.");
 }
 
 export function mergeManagedPublicArtifacts(

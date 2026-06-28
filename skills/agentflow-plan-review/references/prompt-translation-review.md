@@ -2,6 +2,8 @@
 
 Use this to review whether a graph will compile into strong AI prompts. Each skill is standalone, so this file repeats the prompt-translation checks needed during plan review.
 
+Graph JSON is prompt source code. Review every prompt-facing field as LLM input, not as authoring notes. Graph-construction semantics belong outside the graph.
+
 ## What To Check
 
 | Authored input | Compiled prompt effect | Review question |
@@ -39,6 +41,19 @@ Review authored prose before judging the lowered prompt. Authoring rationale bel
 | Artifact descriptions | Durable output contract and what the artifact proves. Flag write-command instructions or runtime lowering details. |
 | Deep-work `phases.*.intent` | Additive phase-specific objective, evidence, or boundary. Flag replacement parent contracts or generic instructions repeated across every phase. |
 | Work-list deep-work `item_worker.phases.*.intent` | Additive item-phase objective, evidence, or boundary. Flag duplicated parent/item goals, graph mechanics, or phase text that weakens frozen-item constraints. |
+
+## Graph-Semantics Leak Findings
+
+Report a finding when prompt-facing graph text contains:
+
+- authoring rationale such as why the graph uses Agentflow, a managed pattern, a node, or a check;
+- topology narration, node ids, downstream-node mechanics, or dynamic lowered ids;
+- managed-pattern lifecycle explanation such as planner/executor/publisher mechanics instead of the phase's actual task;
+- publisher/private/public artifact mechanics unless those are the user's product terms;
+- `af` command instructions unless the graph is specifically teaching Agentflow operation;
+- review notes about how a prompt should compile.
+
+The fix is usually to move the rationale into authoring notes and replace the field with outcome, evidence, authority boundary, context reason, artifact meaning, or rubric standard.
 
 ## Approval Bar
 

@@ -61,6 +61,10 @@ export interface OutcomeVerificationPromptCompletionPacket {
   }>;
   orientation?: {
     orient_called: boolean;
+    orient_call_count?: number;
+    first_orient_at?: string;
+    last_orient_at?: string;
+    modes_seen?: string[];
   };
   milestones?: {
     total: number;
@@ -312,6 +316,15 @@ function renderCompletionPacket(packet: OutcomeVerificationPromptCompletionPacke
 
   if (packet.orientation) {
     lines.push(`- af orient called: ${packet.orientation.orient_called}`);
+    if (packet.orientation.orient_call_count !== undefined) {
+      lines.push(`- af orient calls: ${packet.orientation.orient_call_count}`);
+    }
+    if (packet.orientation.modes_seen && packet.orientation.modes_seen.length > 0) {
+      lines.push(`- af orient modes: ${packet.orientation.modes_seen.join(", ")}`);
+    }
+    if (packet.orientation.first_orient_at || packet.orientation.last_orient_at) {
+      lines.push(`- af orient timing: first=${packet.orientation.first_orient_at ?? "unknown"}; last=${packet.orientation.last_orient_at ?? "unknown"}`);
+    }
   }
 
   if (packet.milestones) {

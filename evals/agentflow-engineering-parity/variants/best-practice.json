@@ -1,0 +1,8 @@
+{
+  "id": "best-practice",
+  "description": "Scenario-authored best-practice Agentflow graph for long-running engineering comparison.",
+  "env": {
+    "AGENTFLOW_CODEX_MODEL": "gpt-5.5",
+    "AGENTFLOW_CODEX_REASONING_EFFORT": "high"
+  }
+}

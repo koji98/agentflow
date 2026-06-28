@@ -18,6 +18,7 @@ Use this skill for `agentflow eval`. Use `agentflow-authoring` for graph authori
 - Repeated trials matter when model variance matters.
 - Prefer local repos, local docs fixtures, tool fixtures, and deterministic simulation over live public services.
 - Capability suites can start below 100% pass rate. Regression gates should be stable and near 100%.
+- Pattern choice is an eval signal. If Agentflow loses because it selected a lifecycle that damages the final outcome, report that as pattern-fit failure, not just worker failure.
 - Do not call a suite ready until validate, a single trial, report, inspect, and compare produce useful artifacts.
 
 ## Route By Task
@@ -42,7 +43,8 @@ Use this skill for `agentflow eval`. Use `agentflow-authoring` for graph authori
 8. Run one trial for one scenario and inspect artifacts before scaling up.
 9. Run repeated trials with `agentflow eval run <suite> --variant <id|all> --scenario <id|all> --trials <n> --eval-root <path> --concurrency <n>`.
 10. Start review from `report.md` and `benchmark.json`, then inspect failed trial scorecards and trace packets.
-11. For repo validation, run `node scripts/validate-real-evals.mjs --harness codex-cli` when real Codex CLI behavior matters.
+11. Classify failures as product outcome, pattern fit, prompt/objective distortion, verifier substrate, recovery policy, context/evidence quality, or grader signal before changing prompts or patterns.
+12. For repo validation, run `node scripts/validate-real-evals.mjs --harness codex-cli` when real Codex CLI behavior matters.
 
 ## Authoring Posture
 
@@ -50,5 +52,7 @@ Use this skill for `agentflow eval`. Use `agentflow-authoring` for graph authori
 - A trial is scenario x variant x run number. Use repeated trials when model variance matters.
 - Expected `paused` outcomes require a typed runtime authority request, such as a missing credential or planned checkpoint. Graph-contract, policy, scope, or underspecified-intent gaps should normally be expected `failed` outcomes with evidence.
 - Required deterministic criteria override quality scores.
+- Verifier, judge, parser, harness, or tool substrate failures must be reported separately from product correctness so they route to infrastructure/recovery fixes.
+- Agentflow is generic. Do not tune prompts, graphs, or rubrics to satisfy one eval's hidden expectation if the change would make ordinary user workflows worse.
 - Capability suites should include difficult tasks and may start below 100%. Regression suites should target near-100% pass rates for behavior that must not drift.
 - If a scenario has 0% pass rate across many trials, first check whether the task is ambiguous, impossible, or overfit to brittle grader assumptions.

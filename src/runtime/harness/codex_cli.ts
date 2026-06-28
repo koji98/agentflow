@@ -7,6 +7,7 @@ import { getHarnessCapabilities } from "../../graph/harness_capabilities.js";
 import { builtInCodexApprovalPolicy } from "../../graph/profiles.js";
 import { createProcessTerminationController } from "../process_control.js";
 import { startSpawnBroker } from "./spawn_broker.js";
+import { writePromptDiagnostics } from "./prompt_diagnostics.js";
 import {
   buildHarnessSpawnEnv,
   collectMissingHarnessBinaryDiagnostics,
@@ -299,6 +300,15 @@ export function createCodexCliHarness(
       if (invocation.promptPath) {
         await mkdir(dirname(invocation.promptPath), { recursive: true });
         await writeFile(invocation.promptPath, `${prompt}\n`, "utf8");
+        await writePromptDiagnostics({
+          invocation,
+          prompt: `${prompt}\n`,
+          renderer: "renderHarnessPrompt",
+          promptPath: invocation.promptPath,
+          metadata: {
+            harness: "codex-cli"
+          }
+        });
       }
       const spawnBroker = startSpawnBroker(invocation);
       const codexHome = harnessConfig.isolation === "isolated"

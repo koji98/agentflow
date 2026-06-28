@@ -3,6 +3,31 @@
   "bucket": "realworld-pinned-repo",
   "difficulty": "hard",
   "description": "Fix validator.js URL parsing so hostnames with numeric ports and no protocol are accepted when protocol is not required.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Fix validator.js URL parsing so hostnames with numeric ports and no protocol are accepted when protocol is not required.",
+    "scenario_type": "release-sentinel:realworld-pinned-repo",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "workspace scope",
+      "supervisor recovery",
+      "trajectory discipline",
+      "delivery auditability",
+      "custom deterministic checks",
+      "quality rubric"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "workspace changes are missing, forbidden, or out of scope",
+      "expected supervisor recovery, learning, or authority behavior is missing",
+      "required trajectory event is missing or forbidden trajectory appears",
+      "delivery package is missing, unsupported, or not review-ready",
+      "scenario-specific deterministic or quality criterion failed",
+      "quality rubric finds weak evidence, scope control, or handoff quality"
+    ],
+    "tweak_signal": "Inspect supervisor classification, material delta, recovery learning, authority policy, retry packet shape, and whether the agent used recovery evidence."
+  },
   "workflow": {
     "graph_template": "../../templates/validator-url-port-no-protocol.graph.template.json",
     "harness": "codex-cli",

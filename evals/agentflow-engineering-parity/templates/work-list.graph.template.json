@@ -26,11 +26,14 @@
   "profiles": {
     "default": {
       "harness": "{{workflow.harness}}",
-      "model": "auto",
+      "model": "{{variant.env.AGENTFLOW_CODEX_MODEL}}",
+      "reasoning_effort": "{{variant.env.AGENTFLOW_CODEX_REASONING_EFFORT}}",
       "sandbox": "workspace-write"
     },
     "supervisor": {
       "harness": "codex-cli",
+      "model": "{{variant.env.AGENTFLOW_CODEX_MODEL}}",
+      "reasoning_effort": "{{variant.env.AGENTFLOW_CODEX_REASONING_EFFORT}}",
       "sandbox": "read-only"
     }
   },
@@ -86,7 +89,7 @@
             "done_when": [
               "The item goal is satisfied in the local fixture repository.",
               "The requested validation command has passed or a concrete blocker is recorded with evidence.",
-              "The item handoff records changed files, validation evidence, risks, and downstream implications."
+              "The item result records changed files, validation evidence, risks, and downstream implications."
             ]
           },
           "item_worker": {

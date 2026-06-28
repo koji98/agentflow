@@ -1,0 +1,130 @@
+{
+  "version": "1",
+  "graph_id": "engineering-parity-{{scenario.id}}-{{variant.id}}-{{trial.index}}",
+  "intent": {
+    "goal": "Complete the requested engineering change in task.md with production-quality workflow orchestration behavior, validation evidence, and a concise handoff.",
+    "acceptance_criteria": [
+      "The implementation satisfies task.md for workflow validation, dependency execution, retry and failure handling, skipped dependents, and Markdown reporting.",
+      "The repository validation command `{{scenario.metadata.validation_command}}` passes.",
+      "The handoff artifact explains changed files, validation evidence, and remaining risks."
+    ],
+    "constraints": [
+      "Do not modify task.md, package.json, or test files.",
+      "Do not use network access.",
+      "Do not broaden the repository beyond the requested orchestrator and report implementation."
+    ]
+  },
+  "repos": {
+    "main": {
+      "path": "{{environment.repo}}"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "{{workflow.workspace_backend}}"
+  },
+  "profiles": {
+    "default": {
+      "harness": "{{workflow.harness}}",
+      "model": "{{variant.env.AGENTFLOW_CODEX_MODEL}}",
+      "reasoning_effort": "{{variant.env.AGENTFLOW_CODEX_REASONING_EFFORT}}",
+      "sandbox": "workspace-write"
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "model": "{{variant.env.AGENTFLOW_CODEX_MODEL}}",
+      "reasoning_effort": "{{variant.env.AGENTFLOW_CODEX_REASONING_EFFORT}}",
+      "sandbox": "read-only"
+    }
+  },
+  "supervision": {
+    "profile": "supervisor",
+    "max_total_interventions": 2
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "pattern_deep_work",
+        "id": "orchestrator_delivery",
+        "intent": {
+          "goal": "Read task.md, complete the requested workflow orchestrator and Markdown report implementation in the local fixture repository, run validation, and publish a concise handoff artifact.",
+          "acceptance_criteria": [
+            "The implementation satisfies task.md for validation, dependency ordering, retries, failure propagation, skipped dependents, and Markdown reporting.",
+            "The validation command `{{scenario.metadata.validation_command}}` passes.",
+            "The handoff artifact lists changed files, validation commands and results, completed behavior, and any remaining risks."
+          ],
+          "constraints": [
+            "Do not edit task.md, package.json, or test files.",
+            "Do not use network access.",
+            "Do not change public API names other than implementing the requested exports."
+          ]
+        },
+        "runtime": {
+          "repo": "main"
+        },
+        "support": {
+          "context": [
+            {
+              "name": "task_plan",
+              "kind": "workspace_file",
+              "path": "task.md",
+              "what": "Detailed engineering task plan for the local fixture.",
+              "why": "It defines the requested implementation behavior, validation command, and handoff requirements."
+            },
+            {
+              "name": "source_files",
+              "kind": "workspace_glob",
+              "path": "src/*.js",
+              "what": "Current source files for the workflow runner and Markdown report formatter.",
+              "why": "These are the only source files expected to change for the requested implementation."
+            },
+            {
+              "name": "acceptance_tests",
+              "kind": "workspace_glob",
+              "path": "test/*.test.js",
+              "what": "Executable acceptance tests for the orchestrator behavior.",
+              "why": "They define observable behavior for scheduling, retry, skipped tasks, validation errors, and report formatting."
+            }
+          ]
+        },
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "Concise engineering handoff with changed files, validation evidence, completed behavior, and remaining risks."
+          }
+        },
+        "completion": {
+          "max_cycles": 3,
+          "pass_threshold": 0.9,
+          "criteria": [
+            {
+              "id": "validation",
+              "kind": "command",
+              "command": "{{scenario.metadata.validation_command}}",
+              "weight": 0.45,
+              "required": true
+            },
+            {
+              "id": "task_contract",
+              "kind": "rubric",
+              "target": "workspace",
+              "rubric": "The implementation satisfies task.md for workflow validation, dependency ordering, retry and failure semantics, skipped dependents, Markdown reporting, and scoped changes.",
+              "weight": 0.4,
+              "required": true
+            },
+            {
+              "id": "handoff",
+              "kind": "rubric",
+              "target": "artifact:handoff",
+              "rubric": "The handoff lists changed files, exact validation commands and results, completed behavior, and remaining risks or blockers without mentioning internal graph mechanics.",
+              "weight": 0.15
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

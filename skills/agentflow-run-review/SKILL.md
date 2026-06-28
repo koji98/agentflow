@@ -22,7 +22,7 @@ Use `agentflow-operations` for live run inspection and resume. Use `agentflow-pl
 1. Inspect delivery first, then supervisor and attempt evidence when needed; see `references/run-postmortem.md`.
 2. Compare the intended workflow, authored graph, compiled/run behavior, and delivered artifacts.
 3. Identify what helped: composition, context, artifacts, checks, tools, supervision.
-4. Identify what hurt: over-specificity, missing context, brittle checks, artifact gaps, authority issues, weak rubrics, unnecessary cost.
+4. Identify what hurt: pattern fit, prompt/objective distortion, verifier substrate failures, recovery policy gaps, eval signal quality, over-specificity, missing context, brittle checks, artifact gaps, authority issues, weak rubrics, and unnecessary cost.
 5. Decide extraction targets: plugin, eval, docs, skill, graph template, or no extraction; see `references/plugin-extraction.md` and `references/eval-extraction.md`.
 6. Produce a run learning report with concrete next actions.
 
@@ -32,12 +32,15 @@ Use `agentflow-operations` for live run inspection and resume. Use `agentflow-pl
 - Recommend an eval when the failure mode should be regression-tested across future graph or prompt changes.
 - Recommend authoring-skill changes when the same graph mistake is likely to recur.
 - Recommend docs updates when operator mental models or run review order were unclear.
+- Classify failures by pattern fit, prompt/objective distortion, product outcome, verifier/tool substrate, recovery policy, context/evidence quality, and eval/grader signal before proposing fixes.
+- Treat locally obedient workers with globally poor outcomes as a graph/pattern lesson first, not just a worker-quality problem.
 - Do not turn one-off inconvenience into a plugin or skill.
 
 ## Red Flags
 
 - Reviewing only final code and ignoring run evidence.
 - Ignoring supervisor interventions.
+- Treating verifier, parser, harness, or tool failures as semantic worker failures.
 - Treating heavy managed patterns as always good or always bad.
 - Extracting a plugin for a one-time command.
 - Failing to convert recurring brittle checks into an eval scenario.

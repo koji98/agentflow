@@ -9,12 +9,14 @@
     "scenarios/settings-schema-defaults/scenario.json",
     "scenarios/duration-parser-refactor/scenario.json",
     "scenarios/stale-docs-code-conflict/scenario.json",
-    "scenarios/frontend-tabs-reducer/scenario.json"
+    "scenarios/frontend-tabs-reducer/scenario.json",
+    "scenarios/workflow-orchestrator-complex/scenario.json"
   ],
   "variants": [
     "variants/current.json",
     "variants/deep-work.json",
-    "variants/work-list.json"
+    "variants/work-list.json",
+    "variants/best-practice.json"
   ],
   "criteria": [
     {

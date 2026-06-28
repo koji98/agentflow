@@ -560,11 +560,18 @@ describe("runtime engine outcome verification", () => {
             verifier_metadata: {
                 parse_status: string;
                 attempt_count: number;
+                failure_code?: string;
             };
+            findings: Array<{ category: string }>;
         };
         expect(payload.passed).toBe(false);
         expect(payload.verifier_metadata.parse_status).toBe("unparseable");
         expect(payload.verifier_metadata.attempt_count).toBeGreaterThanOrEqual(2);
+        expect(payload.verifier_metadata.failure_code).toBe("verification_substrate_failure");
+        expect(payload.findings).toEqual([
+            expect.objectContaining({ category: "verification_substrate_failure" })
+        ]);
+        expect(failedAttempt!.metadata.failure_code).toBe("verification_substrate_failure");
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("fails closed when the verifier harness throws", async () => {

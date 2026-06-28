@@ -1,8 +1,9 @@
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize } from "node:path";
 
 import type { EffectiveSupervisorPolicy } from "../../graph/profiles.js";
 import type { HarnessAdapter, HarnessResult } from "../harness/types.js";
+import { writePromptDiagnostics } from "../harness/prompt_diagnostics.js";
 
 export type DeliveryCurationStatus = "passed" | "failed";
 
@@ -726,7 +727,7 @@ export function createHarnessDeliveryCurator(options: {
   return {
     async curate(input) {
       const prompt = renderDeliveryCuratorPrompt(input);
-      const result: HarnessResult = await options.harness.run({
+      const invocation = {
         promptKind: "delivery_curator",
         runId: options.run_id,
         executionId: `${options.run_id}__delivery_curator`,
@@ -747,7 +748,19 @@ export function createHarnessDeliveryCurator(options: {
         signal: options.signal,
         rubric: prompt,
         promptPath: options.prompt_path
+      } satisfies Parameters<HarnessAdapter["run"]>[0];
+      await mkdir(dirname(options.prompt_path), { recursive: true });
+      await writeFile(options.prompt_path, `${prompt}\n`, "utf8");
+      await writePromptDiagnostics({
+        invocation,
+        prompt: `${prompt}\n`,
+        renderer: "renderDeliveryCuratorPrompt",
+        promptPath: options.prompt_path,
+        metadata: {
+          harness: options.harness.kind
+        }
       });
+      const result: HarnessResult = await options.harness.run(invocation);
       const raw = result.transcript?.last_message ?? result.stdout ?? "";
       await writeFile(options.response_path, raw, "utf8");
       if (result.status !== "passed") {

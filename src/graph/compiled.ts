@@ -6,6 +6,7 @@ import type {
   ExecutableNodeIntent,
   GraphIntent,
   ManagedArtifactForward,
+  ManagedPromptContract,
   ManagedRuntimeMetadata,
   CliHint,
   SupervisionPolicy
@@ -36,6 +37,7 @@ export interface CompiledExecutableNodeBase {
   declared_artifacts: Record<string, ArtifactDefinition>;
   managed_artifact_forwards?: Record<string, ManagedArtifactForward>;
   managed_runtime?: ManagedRuntimeMetadata;
+  managed_prompt?: ManagedPromptContract;
   skills: ResolvedSkill[];
   cli: CliHint[];
   lowered_from?: LoweredManagedKind;

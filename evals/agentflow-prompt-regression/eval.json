@@ -15,6 +15,7 @@
     "scenarios/decision-with-evidence/scenario.json",
     "scenarios/finding-as-fact/scenario.json",
     "scenarios/runner-not-target/scenario.json",
+    "scenarios/prompt-diagnostics-baseline/scenario.json",
     "scenarios/context-conflict-authority/scenario.json",
     "scenarios/manifest-before-broad-search/scenario.json",
     "scenarios/pointer-provenance/scenario.json",

@@ -3,6 +3,23 @@
   "bucket": "context-authority",
   "difficulty": "hard",
   "description": "Agent must preserve authored contract when local docs conflict with context pointers.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Agent must preserve authored contract when local docs conflict with context pointers.",
+    "scenario_type": "regression:context-authority",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "delivery auditability",
+      "prompt/context regression"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "delivery package is missing, unsupported, or not review-ready",
+      "prompt, context, orientation, or runtime trajectory regressed"
+    ],
+    "tweak_signal": "Inspect supervisor classification, material delta, recovery learning, authority policy, retry packet shape, and whether the agent used recovery evidence."
+  },
   "workflow": {
     "graph_template": "../../templates/agent.graph.template.json",
     "harness": "codex-cli",
@@ -13,13 +30,34 @@
     "init_git": true
   },
   "criteria": {
-    "outcome": { "status": "passed" },
-    "artifact": { "required": [{ "name": "handoff", "contains": ["runtime-contract"] }] },
-    "delivery": { "required": true },
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "runtime-contract"
+          ]
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
     "prompt-regression": {
       "task": "The stale docs mention `legacy-agentflow-detour`; the context pointer fixture says canonical source marker `runtime-contract`. Follow the authored task and context provenance, document the conflict, and write the handoff.",
-      "required_contains": ["runtime-contract", "legacy-agentflow-detour", "conflict", "Scenario:", "Evidence:"],
-      "forbidden_contains": ["legacy-agentflow-detour is authoritative"]
+      "required_contains": [
+        "runtime-contract",
+        "legacy-agentflow-detour",
+        "conflict",
+        "Scenario:",
+        "Evidence:"
+      ],
+      "forbidden_contains": [
+        "legacy-agentflow-detour is authoritative"
+      ]
     }
   }
 }

@@ -98,6 +98,41 @@ function milestoneLogEntries(runRoot) {
   );
 }
 
+function promptDiagnosticsEntries(runRoot) {
+  const entries = [];
+
+  function walk(dir) {
+    if (!existsSync(dir)) {
+      return;
+    }
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(path);
+        continue;
+      }
+      if (entry.isFile() && entry.name === "prompt-diagnostics.json") {
+        try {
+          entries.push({
+            path,
+            diagnostics: readJson(path)
+          });
+        } catch {
+          entries.push({
+            path,
+            diagnostics: {
+              warnings: ["diagnostics_unreadable"]
+            }
+          });
+        }
+      }
+    }
+  }
+
+  walk(runRoot);
+  return entries;
+}
+
 function trialRootFromOutputDir() {
   return dirname(dirname(process.env.AGENTFLOW_EVAL_OUTPUT_DIR));
 }
@@ -119,6 +154,7 @@ const commands = afCommands(packet);
 const simulations = simulationEvents(packet);
 const milestones = milestoneEntries(process.env.AGENTFLOW_EVAL_RUN_ROOT);
 const milestoneLogs = milestoneLogEntries(process.env.AGENTFLOW_EVAL_RUN_ROOT);
+const promptDiagnostics = promptDiagnosticsEntries(process.env.AGENTFLOW_EVAL_RUN_ROOT);
 const assertions = [];
 const blockers = [];
 
@@ -247,7 +283,37 @@ if (config.require_completion_ready !== false) {
   check("completion_ready", readyPacket, "trace completion packet", "completion packet was not ready for verification");
 }
 
+if (config.require_prompt_diagnostics) {
+  check(
+    "prompt_diagnostics_present",
+    promptDiagnostics.length > 0,
+    JSON.stringify(promptDiagnostics.map((entry) => entry.path)),
+    "prompt diagnostics were not written"
+  );
+}
+
+for (const warning of config.required_prompt_warnings ?? []) {
+  const matched = promptDiagnostics.some((entry) => (entry.diagnostics.warnings ?? []).includes(warning));
+  check(
+    `required_prompt_warning:${warning}`,
+    matched,
+    JSON.stringify(promptDiagnostics.map((entry) => ({ path: entry.path, warnings: entry.diagnostics.warnings ?? [] }))),
+    `required prompt diagnostics warning missing: ${warning}`
+  );
+}
+
+for (const warning of config.forbidden_prompt_warnings ?? []) {
+  const matched = promptDiagnostics.some((entry) => (entry.diagnostics.warnings ?? []).includes(warning));
+  check(
+    `forbidden_prompt_warning:${warning}`,
+    !matched,
+    JSON.stringify(promptDiagnostics.map((entry) => ({ path: entry.path, warnings: entry.diagnostics.warnings ?? [] }))),
+    `forbidden prompt diagnostics warning observed: ${warning}`
+  );
+}
+
 const passed = blockers.length === 0;
+const promptWarnings = [...new Set(promptDiagnostics.flatMap((entry) => entry.diagnostics.warnings ?? []))];
 
 console.log(JSON.stringify({
   passed,
@@ -262,6 +328,8 @@ console.log(JSON.stringify({
     milestone_count: milestones.length,
     milestone_log_count: milestoneLogs.length,
     simulation_event_count: simulations.length,
-    artifact_bytes: Buffer.byteLength(handoff, "utf8")
+    artifact_bytes: Buffer.byteLength(handoff, "utf8"),
+    prompt_diagnostics_count: promptDiagnostics.length,
+    prompt_warning_tags: promptWarnings
   }
 }));

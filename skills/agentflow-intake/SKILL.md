@@ -21,16 +21,18 @@ Use `agentflow-authoring` after a workflow brief exists.
 
 1. Establish the top-level outcome: what should be true when the run ends.
 2. Confirm why Agentflow is the right tool: long-running work, durable evidence, supervision, multi-node handoffs, or reusable workflow value.
-3. Clarify scope, non-goals, authority, planned checkpoints, typed authority boundaries, and agent autonomy; use `references/grill-questions.md` when the requirements are still underdeveloped.
-4. Choose an assurance profile: fast, balanced, high-assurance, exploration, or learning loop. See `references/assurance-profiles.md`.
-5. Clarify evidence: deterministic checks, rubrics, artifacts, delivery review, PRs, reports, or eval outputs.
-6. Produce a workflow brief using `references/workflow-brief.md`.
-7. Stop before graph authoring unless the user explicitly asks to continue with `agentflow-authoring`.
+3. Run a bounded grill-me alignment loop when the requirements are underdeveloped: at most 3 rounds, at most 10 questions per round, using `references/grill-questions.md`.
+4. After each grill round, summarize what is decided, what remains uncertain, and whether another round would materially change graph shape, authority, evidence, or assurance.
+5. Choose an assurance profile: fast, balanced, high-assurance, exploration, or learning loop. See `references/assurance-profiles.md`.
+6. Clarify evidence: deterministic checks, rubrics, artifacts, delivery review, PRs, reports, or eval outputs.
+7. Produce a workflow brief using `references/workflow-brief.md`.
+8. Stop before graph authoring unless the user explicitly asks to continue with `agentflow-authoring`.
 
 ## Decision Rules
 
 - Ask about outcomes, authority, evidence, risk, and review surface; do not ask the user to choose node kinds.
-- Prefer one meaningful question at a time when intent is unclear.
+- Use multi-question rounds only for the bounded grill-me loop. Outside that loop, prefer one meaningful clarification question at a time when intent is unclear.
+- Do not exceed 30 total grill questions. Stop earlier when the workflow brief is coherent enough to author a graph.
 - Treat implementation details as optional context unless they are true constraints.
 - Record where the agent should have freedom to inspect and choose the implementation path.
 - If the request is actually plugin, eval, operations, or run-learning work, route to `agentflow-plugins`, `agentflow-evals`, `agentflow-operations`, or `agentflow-run-review`.

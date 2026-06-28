@@ -2,6 +2,8 @@
 
 Write intent for the agent that will execute the graph, not for a human reading the graph file.
 
+Intent is runtime prompt input, not authoring commentary. Do not mention graph construction, node topology, managed-pattern mechanics, downstream routing, publisher mechanics, or why the author chose Agentflow unless the user task is literally to work on Agentflow itself.
+
 ## Graph Intent
 
 Graph intent is injected into every executable node. Keep it globally true and behavior-bearing:
@@ -12,7 +14,7 @@ Graph intent is injected into every executable node. Keep it globally true and b
 - global `Do not ...` constraints
 - quality bar, including simplicity and no AI slop when relevant
 
-Do not describe graph topology, managed pattern internals, or implementation order unless that is a true global constraint.
+Do not describe graph topology, managed pattern internals, downstream-node mechanics, publisher mechanics, or implementation order unless that is a true global constraint.
 
 No AI slop means: do not introduce broad generic abstractions, unreviewable rewrites, placeholder tests, dead code, invented architecture, generic copy, or code that ignores existing repo patterns.
 

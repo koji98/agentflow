@@ -22,7 +22,8 @@ import {
   buildAttemptEvidenceBundleFromPaths,
   renderAttemptEvidenceMarkdown
 } from "../runtime/attempt_evidence.js";
-import type { HarnessAdapter } from "../runtime/harness/types.js";
+import { writePromptDiagnostics } from "../runtime/harness/prompt_diagnostics.js";
+import type { AgentInvocation, HarnessAdapter } from "../runtime/harness/types.js";
 import { renderHarnessPrompt } from "../runtime/harness/types.js";
 import type { SupervisorCausalContext, SupervisorRecoveryTarget } from "./causal.js";
 import type { FailureClassification } from "./classifier.js";
@@ -53,7 +54,8 @@ import type {
   SupervisorCausalCaseFile,
   SupervisorCausalTargetRecord,
   SupervisorRequirementEvidenceMap,
-  RecoveryResumeDecision
+  RecoveryResumeDecision,
+  SupervisorRecoveryLearningRecord
 } from "./types.js";
 
 const evidenceConcurrencyCap = 4;
@@ -515,6 +517,46 @@ async function writeEvidencePatch(options: {
     evidencePatchPath: patchJsonPath
   });
   await writeFile(promptPath, `${prompt}\n`, "utf8");
+  const diagnosticsInvocation: AgentInvocation = {
+    promptKind: "supervisor_evidence",
+    runId: options.runId,
+    executionId: `${options.caseFile.prior_execution_id}__${options.gather.gather_id}`,
+    repoAlias: options.caseFile.node_contract.repo_alias,
+    repoPath: options.workspacePath,
+    sandbox: "read-only",
+    model: options.model,
+    ...(options.reasoning_effort ? { reasoningEffort: options.reasoning_effort } : {}),
+    ...(options.harness_config ? { harnessConfig: options.harness_config } : {}),
+    contextPacketPath: options.caseFileJsonPath,
+    contextManifestPath: options.contextManifestPath ?? options.caseFileJsonPath,
+    contextManifest: options.contextManifest ?? `Case file: ${options.caseFileJsonPath}`,
+    outputDir: gatherDir,
+    artifacts: {},
+    timeoutSec: Math.min(options.timeout_sec ?? 300, 300),
+    signal: options.signal,
+    promptPath,
+    supervisorEvidence: {
+      gatherKind: options.gather.kind,
+      caseFilePath: options.caseFileJsonPath,
+      evidencePatchPath: patchJsonPath,
+      instructions: [
+        options.gather.reason,
+        "Gather only read-only evidence.",
+        "Do not change the graph contract, repo authority, sandbox authority, or declared artifacts."
+      ]
+    }
+  };
+  await writePromptDiagnostics({
+    invocation: diagnosticsInvocation,
+    prompt: `${prompt}\n`,
+    renderer: "renderHarnessPrompt",
+    promptPath,
+    metadata: {
+      ...(options.harness ? { harness: options.harness.kind } : {}),
+      compiledId: options.caseFile.compiled_id,
+      authoredId: options.caseFile.authored_id
+    }
+  });
 
   let status: SupervisorEvidencePatch["status"] = "passed";
   let stdout = "";
@@ -966,7 +1008,12 @@ function priorStrategyForFingerprint(
 ): {
   strategy?: SupervisorApplyAction;
   target?: string;
+  material_delta?: SupervisorMaterialDelta[];
   material_delta_key?: string;
+  restart_boundary?: RecoveryResumeDecision["restart_boundary"];
+  workspace_decision?: RecoveryResumeDecision["workspace_decision"];
+  required_next_action?: string;
+  validation_gate?: string[];
 } | undefined {
   for (const intervention of [...priorInterventions].reverse()) {
     const evidence = isRecord(intervention.evidence) ? intervention.evidence : {};
@@ -974,22 +1021,45 @@ function priorStrategyForFingerprint(
       continue;
     }
     const plan = isRecord(evidence.recovery_plan) ? evidence.recovery_plan : {};
+    const decision = isRecord(evidence.intervention_decision) ? evidence.intervention_decision : {};
     const strategy = typeof plan.apply_action === "string" ? plan.apply_action as SupervisorApplyAction : undefined;
     const target = intervention.target_compiled_id;
-    const materialDeltaFingerprint = Array.isArray(evidence.material_delta)
+    const materialDelta = Array.isArray(evidence.material_delta)
       ? evidence.material_delta
         .filter(isRecord)
-        .map((delta) => `${String(delta.kind ?? "")}:${String(delta.summary ?? "")}`)
-        .sort()
-        .join("|")
-      : undefined;
+        .map((delta) => ({
+          kind: String(delta.kind ?? "") as SupervisorMaterialDelta["kind"],
+          summary: String(delta.summary ?? ""),
+          ...(isRecord(delta.artifact_paths) ? { artifact_paths: delta.artifact_paths as Record<string, string> } : {})
+        }))
+      : [];
+    const materialDeltaFingerprint = materialDeltaKey(materialDelta);
+    const validationGate = stringArray(decision.validation_gate);
     return {
       ...(strategy ? { strategy } : {}),
       ...(target ? { target } : {}),
-      ...(materialDeltaFingerprint ? { material_delta_key: materialDeltaFingerprint } : {})
+      ...(materialDelta.length > 0 ? { material_delta: materialDelta } : {}),
+      ...(materialDeltaFingerprint ? { material_delta_key: materialDeltaFingerprint } : {}),
+      ...(typeof decision.restart_boundary === "string" ? { restart_boundary: decision.restart_boundary as RecoveryResumeDecision["restart_boundary"] } : {}),
+      ...(typeof decision.workspace_decision === "string" ? { workspace_decision: decision.workspace_decision as RecoveryResumeDecision["workspace_decision"] } : {}),
+      ...(typeof decision.required_next_action === "string" ? { required_next_action: decision.required_next_action } : {}),
+      ...(validationGate.length > 0 ? { validation_gate: validationGate } : {})
     };
   }
   return undefined;
+}
+
+function priorLearningForFingerprint(
+  priorInterventions: SupervisorInterventionRecord[],
+  failureFingerprint: string
+): SupervisorRecoveryLearningRecord[] {
+  return priorInterventions.flatMap((intervention) => {
+    const evidence = isRecord(intervention.evidence) ? intervention.evidence : {};
+    if (evidence.failure_fingerprint !== failureFingerprint || !isRecord(evidence.recovery_learning)) {
+      return [];
+    }
+    return [evidence.recovery_learning as unknown as SupervisorRecoveryLearningRecord];
+  });
 }
 
 function fallbackForRepeatedStrategy(action: SupervisorApplyAction): SupervisorInterventionDecision["fallback_if_repeated"] {
@@ -1043,11 +1113,123 @@ function buildInterventionDecision(options: {
   };
 }
 
+function completionReasonsFromClassification(classification: FailureClassification): string[] {
+  const completion = recordValue(classification.evidence.completion);
+  return stringArray(completion?.blocking_reasons);
+}
+
+function recoveryGuidanceIgnored(options: {
+  classification: FailureClassification;
+  prior: ReturnType<typeof priorStrategyForFingerprint>;
+}): boolean {
+  const reasons = completionReasonsFromClassification(options.classification).map((reason) => reason.toLowerCase());
+  if (reasons.some((reason) => reason.includes("af orient was not run"))) {
+    return true;
+  }
+  if (reasons.some((reason) => reason.includes("no milestones were created"))) {
+    return true;
+  }
+
+  const priorAction = options.prior?.required_next_action?.toLowerCase() ?? "";
+  if (
+    priorAction.includes("artifact") &&
+    reasons.some((reason) => reason.includes("missing expected artifact") || reason.includes("declared artifact"))
+  ) {
+    return true;
+  }
+
+  if (
+    (options.prior?.validation_gate?.length ?? 0) > 0 &&
+    reasons.some((reason) => reason.includes("validation") && reason.includes("missing"))
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function recoveryGuidanceFollowedEnough(classification: FailureClassification): boolean {
+  return isRecord(classification.evidence.outcome_verification) ||
+    classification.evidence.deterministic_check_failed === true ||
+    classification.evidence.verification_substrate_failure === true;
+}
+
+function buildRecoveryLearningRecord(options: {
+  failureFingerprint: string;
+  repeatedFingerprintCount: number;
+  priorInterventions: SupervisorInterventionRecord[];
+  classification: FailureClassification;
+  recoveryPlan: SupervisorRecoveryPlan;
+  result: RuntimeNodeExecutionResult;
+}): SupervisorRecoveryLearningRecord | undefined {
+  if (options.repeatedFingerprintCount < 2) {
+    return undefined;
+  }
+  const prior = priorStrategyForFingerprint(options.priorInterventions, options.failureFingerprint);
+  if (!prior) {
+    return undefined;
+  }
+  const guidanceIgnored = recoveryGuidanceIgnored({
+    classification: options.classification,
+    prior
+  });
+  const guidanceFollowedEnough = recoveryGuidanceFollowedEnough(options.classification);
+  const currentDeltaKey = materialDeltaKey(options.recoveryPlan.runtime_overlay?.material_delta);
+  const priorDeltaKey = prior.material_delta_key ?? "";
+  const sameEffectiveDelta = priorDeltaKey.length > 0 && priorDeltaKey === currentDeltaKey;
+  const failedAgain = options.result.outcome === "failed" || options.result.status === "failed";
+  const terminalContractGap =
+    options.recoveryPlan.apply_action === "fail_contract_gap" ||
+    options.recoveryPlan.apply_action === "fail_terminal";
+  const repeatedNoDeltaTerminal =
+    terminalContractGap &&
+    typeof options.recoveryPlan.terminal_reason === "string" &&
+    options.recoveryPlan.terminal_reason.includes("without a new material delta");
+  const diagnosis: SupervisorRecoveryLearningRecord["diagnosis"] =
+    options.classification.class === "authority_required"
+      ? "authority_gap"
+      : guidanceIgnored
+        ? "guidance_ignored"
+        : sameEffectiveDelta || repeatedNoDeltaTerminal
+          ? "material_delta_irrelevant"
+          : terminalContractGap
+            ? "contract_gap"
+            : failedAgain || guidanceFollowedEnough
+              ? "guidance_insufficient"
+              : "new_worker_error";
+
+  return {
+    prior_failure_fingerprint: options.failureFingerprint,
+    ...(prior.strategy ? { prior_selected_strategy: prior.strategy } : {}),
+    ...(prior.restart_boundary ? { prior_restart_boundary: prior.restart_boundary } : {}),
+    ...(prior.workspace_decision ? { prior_workspace_decision: prior.workspace_decision } : {}),
+    prior_material_delta: prior.material_delta ?? [],
+    ...(prior.required_next_action ? { prior_required_next_action: prior.required_next_action } : {}),
+    prior_validation_gate: prior.validation_gate ?? [],
+    retry_attempt_outcome: options.result.outcome ?? options.result.status,
+    followed_required_next_action: guidanceIgnored ? "no" : guidanceFollowedEnough ? "yes" : "unknown",
+    followed_validation_gate: guidanceIgnored ? "no" : guidanceFollowedEnough ? "yes" : "unknown",
+    material_delta_used: guidanceIgnored ? "no" : sameEffectiveDelta ? "partial" : "unknown",
+    repeated_forbidden_tactic: guidanceIgnored ? "yes" : "unknown",
+    diagnosis,
+    evidence: [
+      `Repeated fingerprint count: ${options.repeatedFingerprintCount}.`,
+      ...(prior.strategy ? [`Prior strategy: ${prior.strategy}.`] : []),
+      `Current strategy: ${options.recoveryPlan.apply_action}.`,
+      ...(guidanceIgnored ? ["Current retry evidence shows the worker missed recovery prerequisites from the prior directive."] : []),
+      ...(guidanceFollowedEnough ? ["Current retry reached verification or check evidence, so the prior directive was at least partially followed."] : []),
+      ...(sameEffectiveDelta ? ["Current retry selected the same effective material delta as the prior recovery."] : []),
+      `Current classification: ${options.classification.class}.`
+    ]
+  };
+}
+
 function repeatedStrategyWithoutDelta(options: {
   failureFingerprint: string;
   repeatedFingerprintCount: number;
   priorInterventions: SupervisorInterventionRecord[];
   recoveryPlan: SupervisorRecoveryPlan;
+  recoveryLearning?: SupervisorRecoveryLearningRecord;
 }): string | undefined {
   if (options.repeatedFingerprintCount < 2 || !retryableApplyAction(options.recoveryPlan.apply_action)) {
     return undefined;
@@ -1064,7 +1246,32 @@ function repeatedStrategyWithoutDelta(options: {
   if (currentDeltaKey.length > 0 && currentDeltaKey !== prior.material_delta_key) {
     return undefined;
   }
+  if (
+    options.recoveryLearning?.diagnosis === "guidance_ignored" &&
+    !priorLearningForFingerprint(options.priorInterventions, options.failureFingerprint)
+      .some((learning) => learning.diagnosis === "guidance_ignored")
+  ) {
+    return undefined;
+  }
   return `Repeated failure fingerprint selected the same ${options.recoveryPlan.apply_action} strategy without a new material delta.`;
+}
+
+function strengthenRecoveryPlanForIgnoredGuidance(plan: SupervisorRecoveryPlan): SupervisorRecoveryPlan {
+  if (!plan.retry_directive) {
+    return plan;
+  }
+  const requiredAction =
+    "The previous retry missed the recovery directive. Before any task work, run `af orient`, read the recovery Read First pointers, then perform the required next action exactly.";
+  const validationFocus =
+    "Before final response, rerun `af complete check` and ensure recovery orientation and required artifact/validation evidence are present.";
+  return {
+    ...plan,
+    retry_directive: {
+      ...plan.retry_directive,
+      must_do: [...new Set([requiredAction, ...plan.retry_directive.must_do])].slice(0, 6),
+      validation_focus: [...new Set([validationFocus, ...plan.retry_directive.validation_focus])].slice(0, 6)
+    }
+  };
 }
 
 function forceContractGapForRepeatedStrategy(
@@ -1337,6 +1544,101 @@ function isAgentFacingGuidance(value: string): boolean {
   return !/(human-debug|evidence-patch|case-file|recovery-plan|recovery-envelope|runtime[/\\]supervisor|intervention bundle|exact failed prompt|[/\\]agent[/\\](prompt|context|attempt-memory|supervisor-recovery|response)\.md|[/\\]runtime[/\\])/u.test(lower);
 }
 
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    : [];
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined;
+}
+
+function firstOutcomeFindingSummary(value: unknown): string | undefined {
+  const outcome = recordValue(value);
+  if (!outcome) {
+    return undefined;
+  }
+  for (const key of ["blockers", "findings"]) {
+    const entries = outcome[key];
+    if (!Array.isArray(entries)) {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!isRecord(entry)) {
+        continue;
+      }
+      const category = typeof entry.category === "string" ? entry.category : undefined;
+      const evidence = typeof entry.evidence === "string" ? entry.evidence : undefined;
+      const recommendation = typeof entry.recommendation === "string" ? entry.recommendation : undefined;
+      const summary = [category, evidence, recommendation].filter(Boolean).join(": ");
+      if (summary.length > 0) {
+        return summary;
+      }
+    }
+  }
+  return typeof outcome.summary === "string" ? outcome.summary : undefined;
+}
+
+function recoveryGuidanceFromFailure(options: {
+  classification: FailureClassification;
+  runtimeOverlay?: SupervisorRuntimeOverlay;
+}): {
+  must_do: string[];
+  validation_focus: string[];
+} {
+  const evidence = options.classification.evidence;
+  const completion = recordValue(evidence.completion);
+  const completionReasons = stringArray(completion?.blocking_reasons);
+  const outcomeSummary = firstOutcomeFindingSummary(evidence.outcome_verification);
+  const mustDo: string[] = [];
+  const validationFocus: string[] = [];
+
+  if (completionReasons.length > 0) {
+    mustDo.push(`Repair completion blocker: ${completionReasons[0]}`);
+    validationFocus.push("Run `af complete check` after the repair and do not finish until it reports ready or a trusted authority blocker.");
+  }
+
+  if (options.classification.class === "artifact_contract_failure") {
+    mustDo.push("Publish the missing declared artifact evidence, then rerun `af complete check`.");
+    validationFocus.push("Confirm every declared artifact named by the failed contract is present before final response.");
+  }
+
+  if (evidence.verification_substrate_failure === true) {
+    mustDo.push("Rerun only the failed verification substrate; preserve completed worker output unless the new verdict identifies a work defect.");
+    validationFocus.push("The verification rerun must produce a structured verifier/check result before another worker retry.");
+  }
+
+  if (evidence.deterministic_check_failed === true) {
+    mustDo.push("Inspect the failed deterministic check evidence and satisfy that exact gate before retry completion.");
+    validationFocus.push("Rerun the failed deterministic check or an equivalent narrower diagnostic that proves the same condition.");
+  }
+
+  if (outcomeSummary) {
+    mustDo.push(`Address verifier finding: ${outcomeSummary}`);
+    validationFocus.push("The next completion evidence must directly answer the verifier finding before final response.");
+  }
+
+  if (options.runtimeOverlay?.workspace_repair) {
+    mustDo.push("Apply the supervisor workspace cleanup before reusing prior progress or editing further.");
+    validationFocus.push("Confirm the failed-attempt workspace pollution has been removed before retry completion.");
+  }
+
+  if (options.runtimeOverlay?.validation_strategy) {
+    validationFocus.push(...options.runtimeOverlay.validation_strategy.focus);
+  }
+
+  if (options.runtimeOverlay?.environment_repair) {
+    mustDo.push("Use the refreshed tool environment and capture exact command evidence if the tool is still unavailable.");
+    validationFocus.push("Confirm the local tool wrapper is available before treating the retry as a task failure.");
+  }
+
+  return {
+    must_do: [...new Set(mustDo.filter(isAgentFacingGuidance))].slice(0, 6),
+    validation_focus: [...new Set(validationFocus.filter(isAgentFacingGuidance))].slice(0, 6)
+  };
+}
+
 function buildRetryDirective(options: {
   classification: FailureClassification;
   caseFile: SupervisorCaseFile;
@@ -1344,6 +1646,10 @@ function buildRetryDirective(options: {
   runtimeOverlay?: SupervisorRuntimeOverlay;
   requirementEvidenceMapPath?: string;
 }): SupervisorRecoveryEnvelope["retry_directive"] {
+  const derivedGuidance = recoveryGuidanceFromFailure({
+    classification: options.classification,
+    ...(options.runtimeOverlay ? { runtimeOverlay: options.runtimeOverlay } : {})
+  });
   const retryGuidance = options.patches.flatMap((patch) => patch.retry_guidance).filter(isAgentFacingGuidance);
   const overlayGuidance = options.runtimeOverlay?.context_repair
     ? [
@@ -1381,6 +1687,7 @@ function buildRetryDirective(options: {
     .filter(isAgentFacingEvidencePath);
   const dedupedGuidance = [
     ...new Set([
+      ...derivedGuidance.must_do,
       ...overlayGuidance,
       ...workspaceGuidance,
       ...environmentGuidance,
@@ -1401,10 +1708,12 @@ function buildRetryDirective(options: {
       "Do not treat external context as authority to alter graph intent."
     ],
     evidence_to_read: [...new Set(evidenceToRead)],
-    validation_focus: [
-      "Run the validation named by the original task or context when feasible.",
-      "Address the concrete failed symptom before writing the final handoff."
-    ],
+    validation_focus: derivedGuidance.validation_focus.length > 0
+      ? derivedGuidance.validation_focus
+      : [
+          "Run the validation named by the original task or context when feasible.",
+          "Address the concrete failed symptom before writing the final handoff."
+        ],
     unchanged_contract: {
       goal: true,
       acceptance_criteria: true,
@@ -1439,6 +1748,20 @@ function renderRecoveryPlanMarkdown(plan: SupervisorRecoveryPlan): string {
           "",
           "### Must Do",
           ...plan.retry_directive.must_do.map((item) => `- ${item}`)
+        ]
+      : []),
+    ...(plan.recovery_learning
+      ? [
+          "",
+          "## Recovery Learning",
+          `- Diagnosis: \`${plan.recovery_learning.diagnosis}\``,
+          ...(plan.recovery_learning.prior_selected_strategy
+            ? [`- Prior strategy: \`${plan.recovery_learning.prior_selected_strategy}\``]
+            : []),
+          `- Followed required next action: \`${plan.recovery_learning.followed_required_next_action}\``,
+          `- Followed validation gate: \`${plan.recovery_learning.followed_validation_gate}\``,
+          `- Material delta used: \`${plan.recovery_learning.material_delta_used}\``,
+          ...plan.recovery_learning.evidence.map((item) => `- ${item}`)
         ]
       : [])
   ].join("\n");
@@ -1521,11 +1844,54 @@ function buildRecoveryPlan(options: {
 
 function renderRecoveryEnvelopeMarkdown(envelope: SupervisorRecoveryEnvelope): string {
   const directive = envelope.retry_directive;
+  const materialDelta = envelope.runtime_overlay?.material_delta ?? [];
+  const whatChanged = materialDelta.length > 0
+    ? materialDelta.map((delta) => `- ${delta.summary}`)
+    : envelope.resume_decision.evidence.length > 0
+      ? envelope.resume_decision.evidence.map((item) => `- ${item}`)
+      : ["- Supervisor selected a recovery boundary from the prior failure evidence."];
+  const evidenceToInspect = directive.evidence_to_read.filter(isAgentFacingEvidencePath);
+  const preserve = [...new Set([...envelope.preserve_progress, ...envelope.resume_decision.reuse])];
+  const discard = [...new Set([...envelope.resume_decision.discard, ...directive.must_not_do, ...envelope.do_not_redo])];
+  const validation = [...new Set([...directive.validation_focus, ...envelope.resume_decision.validation_gate])];
   return [
     "# Supervisor Recovery Case",
     "",
+    "This is a retry. The original task contract is unchanged.",
     "The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.",
     "",
+    "## Prior Failure",
+    directive.summary,
+    "",
+    "## What Changed",
+    ...whatChanged,
+    "",
+    "## Required Next Action",
+    envelope.required_next_action,
+    "",
+    "## Read First",
+    ...(evidenceToInspect.length > 0
+      ? evidenceToInspect.map((item) => `- ${item}`)
+      : ["- Use the current context pointers, prior declared artifacts, and artifact status."]),
+    "",
+    "## Preserve Progress",
+    ...(preserve.length > 0
+      ? preserve.map((item) => `- ${item}`)
+      : ["- Preserve in-scope prior progress unless the recovery evidence says it is unsafe."]),
+    "",
+    "## Discard / Do Not Redo",
+    ...(discard.length > 0
+      ? discard.map((item) => `- ${item}`)
+      : ["- Do not repeat the failed tactic without new evidence."]),
+    "",
+    "## Validation Before Completion",
+    ...(validation.length > 0
+      ? validation.map((item) => `- ${item}`)
+      : ["- Re-run the validation named by the original task when feasible."]),
+    "",
+    ...renderAttemptEvidenceMarkdown(envelope.prior_attempt_evidence),
+    "",
+    "## Audit Metadata",
     `- Classification: \`${envelope.classification}\``,
     `- Selected action: \`${envelope.action}\``,
     `- Resume point: \`${envelope.resume_point}\``,
@@ -1533,43 +1899,7 @@ function renderRecoveryEnvelopeMarkdown(envelope: SupervisorRecoveryEnvelope): s
     `- Workspace decision: \`${envelope.workspace_decision}\``,
     `- Resume reason: \`${envelope.resume_decision.reason_code}\``,
     `- Failure fingerprint: \`${envelope.failure_fingerprint}\``,
-    `- Repeated fingerprint count: \`${envelope.repeated_fingerprint_count}\``,
-    "",
-    ...renderAttemptEvidenceMarkdown(envelope.prior_attempt_evidence),
-    "",
-    "## Summary",
-    directive.summary,
-    "",
-    "## Must Do",
-    ...directive.must_do.map((item) => `- ${item}`),
-    "",
-    "## Preserve Progress",
-    ...(envelope.preserve_progress.length > 0
-      ? envelope.preserve_progress.map((item) => `- ${item}`)
-      : ["- Preserve in-scope prior progress unless the recovery evidence says it is unsafe."]),
-    "",
-    "## Reuse",
-    ...envelope.resume_decision.reuse.map((item) => `- ${item}`),
-    "",
-    "## Discard",
-    ...envelope.resume_decision.discard.map((item) => `- ${item}`),
-    "",
-    "## Must Not Do",
-    ...[...new Set([...directive.must_not_do, ...envelope.do_not_redo])].map((item) => `- ${item}`),
-    "",
-    "## Required Next Action",
-    envelope.required_next_action,
-    "",
-    "",
-    "## Evidence To Inspect",
-    ...(directive.evidence_to_read.length > 0
-      ? directive.evidence_to_read.map((item) => `- ${item}`)
-      : ["- None beyond the active context pointers and prior attempt artifacts."]),
-    "",
-    "## Validation Focus",
-    ...(directive.validation_focus.length > 0
-      ? directive.validation_focus.map((item) => `- ${item}`)
-      : ["- Re-run the validation named by the original task when feasible."])
+    `- Repeated fingerprint count: \`${envelope.repeated_fingerprint_count}\``
   ].join("\n");
 }
 
@@ -1878,15 +2208,34 @@ export async function runSupervisorRecoveryCycle(options: {
     ...(options.causal_context ? { causalContext: options.causal_context } : {}),
     requirementEvidenceMapPath: requirementEvidenceMapMarkdownPath
   });
+  let recoveryLearning = buildRecoveryLearningRecord({
+    failureFingerprint: options.failure_fingerprint,
+    repeatedFingerprintCount: options.repeated_fingerprint_count,
+    priorInterventions: options.prior_interventions,
+    classification: options.classification,
+    recoveryPlan,
+    result: options.result
+  });
 
   const repeatedStrategyBlocker = repeatedStrategyWithoutDelta({
     failureFingerprint: options.failure_fingerprint,
     repeatedFingerprintCount: options.repeated_fingerprint_count,
     priorInterventions: options.prior_interventions,
-    recoveryPlan
+    recoveryPlan,
+    ...(recoveryLearning ? { recoveryLearning } : {})
   });
   if (repeatedStrategyBlocker) {
     recoveryPlan = forceContractGapForRepeatedStrategy(recoveryPlan, repeatedStrategyBlocker);
+    recoveryLearning = buildRecoveryLearningRecord({
+      failureFingerprint: options.failure_fingerprint,
+      repeatedFingerprintCount: options.repeated_fingerprint_count,
+      priorInterventions: options.prior_interventions,
+      classification: options.classification,
+      recoveryPlan,
+      result: options.result
+    });
+  } else if (recoveryLearning?.diagnosis === "guidance_ignored") {
+    recoveryPlan = strengthenRecoveryPlanForIgnoredGuidance(recoveryPlan);
   }
 
   const resumeDecision = buildRecoveryResumeDecision({
@@ -1904,6 +2253,12 @@ export async function runSupervisorRecoveryCycle(options: {
     recoveryPlan = {
       ...recoveryPlan,
       intervention_decision: interventionDecision
+    };
+  }
+  if (recoveryLearning) {
+    recoveryPlan = {
+      ...recoveryPlan,
+      recovery_learning: recoveryLearning
     };
   }
   await writeFile(recoveryPlanJsonPath, `${JSON.stringify(recoveryPlan, null, 2)}\n`, "utf8");
@@ -1971,6 +2326,7 @@ export async function runSupervisorRecoveryCycle(options: {
       confidence: recoveryPlan.confidence
     },
     material_delta: runtimeOverlay?.material_delta ?? [],
+    ...(recoveryPlan.recovery_learning ? { recovery_learning: recoveryPlan.recovery_learning } : {}),
     ...(recoveryEnvelope
       ? {
           retry_target: {
@@ -2067,6 +2423,7 @@ export async function runSupervisorRecoveryCycle(options: {
       },
       material_delta: recoveryPlan.runtime_overlay?.material_delta ?? [],
       ...(recoveryPlan.intervention_decision ? { intervention_decision: recoveryPlan.intervention_decision } : {}),
+      ...(recoveryPlan.recovery_learning ? { recovery_learning: recoveryPlan.recovery_learning } : {}),
       requirement_evidence_map: {
         map_id: requirementEvidenceMap.map_id,
         missing_count: requirementEvidenceMap.missing_evidence.length,

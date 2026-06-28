@@ -10,6 +10,7 @@ import type { CompiledAgentNode } from "../graph/compiled.js";
 import type { EffectiveSupervisorPolicy } from "../graph/profiles.js";
 import type { HarnessName } from "../graph/schema.js";
 import { listAttemptsForCompiledNode, type RuntimeNodeAttempt } from "../runtime/attempts.js";
+import { writePromptDiagnostics } from "../runtime/harness/prompt_diagnostics.js";
 import { renderHarnessPrompt, type AgentInvocation, type HarnessAdapter } from "../runtime/harness/types.js";
 import type { RuntimeSession } from "../runtime/session.js";
 import { prepareAgentTools } from "../runtime/tools/setup.js";
@@ -182,16 +183,17 @@ function renderArtifactRepairBrief(options: {
   prior_response_path: string;
   previous_attempt_evidence_paths: string[];
 }): string {
+  const artifactWriteCommand = (name: string) => `af artifact write ${name}`;
   return [
     "# Artifact Repair Brief",
     "",
     "This brief is runtime-authored for the repair agent. Raw harness logs and debug files remain audit-only.",
     "",
     "## Missing Artifacts",
-    "| Name | Declared Path | Description |",
-    "| --- | --- | --- |",
+    "| Name | Write Command | Declared Path | Description |",
+    "| --- | --- | --- | --- |",
     ...options.missing_artifacts.map((artifact) =>
-      `| \`${artifact.name}\` | \`${artifact.path}\` | ${artifact.description.replace(/\r?\n/gu, " ").replace(/\|/gu, "\\|")} |`
+      `| \`${artifact.name}\` | \`${artifactWriteCommand(artifact.name)}\` | \`${artifact.path}\` | ${artifact.description.replace(/\r?\n/gu, " ").replace(/\|/gu, "\\|")} |`
     ),
     "",
     "## Evidence Pointers",
@@ -204,7 +206,7 @@ function renderArtifactRepairBrief(options: {
     `- Attempt: ${options.repair_attempt} of ${options.max_attempts}`,
     "- Preserve the original node goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts.",
     "- Inspect only the evidence needed to produce the missing declared artifacts.",
-    "- Publish each missing artifact with `af artifact write <name>` and finish with `af complete check`."
+    "- Publish each missing artifact with the exact command listed above and finish with `af complete check`."
   ].join("\n");
 }
 
@@ -291,7 +293,19 @@ export async function runRepairArtifactIntervention(options: {
       ...(options.supervisor_policy ? { supervisor_policy: options.supervisor_policy } : {}),
       ...(options.signal ? { signal: options.signal } : {})
     });
-    await writeFile(promptPath, `${renderHarnessPrompt(unavailableInvocation)}\n`, "utf8");
+    const renderedPrompt = renderHarnessPrompt(unavailableInvocation);
+    await writeFile(promptPath, `${renderedPrompt}\n`, "utf8");
+    await writePromptDiagnostics({
+      invocation: unavailableInvocation,
+      prompt: `${renderedPrompt}\n`,
+      renderer: "renderHarnessPrompt",
+      promptPath,
+      metadata: {
+        ...(harnessName ? { harness: harnessName } : {}),
+        compiledId: options.node.compiled_id,
+        authoredId: options.node.authored_id
+      }
+    });
     const stillMissing = await collectStillMissing(options.missing_artifacts);
     const reason = "Artifact repair could not run because the resolved harness adapter is unavailable.";
     await Promise.all([
@@ -402,7 +416,19 @@ export async function runRepairArtifactIntervention(options: {
     ...(options.supervisor_policy ? { supervisor_policy: options.supervisor_policy } : {}),
     ...(options.signal ? { signal: options.signal } : {})
   });
-  await writeFile(promptPath, `${renderHarnessPrompt(invocation)}\n`, "utf8");
+  const renderedPrompt = renderHarnessPrompt(invocation);
+  await writeFile(promptPath, `${renderedPrompt}\n`, "utf8");
+  await writePromptDiagnostics({
+    invocation,
+    prompt: `${renderedPrompt}\n`,
+    renderer: "renderHarnessPrompt",
+    promptPath,
+    metadata: {
+      harness: harness.kind,
+      compiledId: options.node.compiled_id,
+      authoredId: options.node.authored_id
+    }
+  });
   const result = await harness.run(invocation);
   const stillMissing = await collectStillMissing(options.missing_artifacts);
   const status =

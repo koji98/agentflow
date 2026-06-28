@@ -15,15 +15,18 @@ import { listAttemptsForCompiledNode, selectAttempt } from "../attempts.js";
 import type {
   ContextInputProvenance,
   ContextPacket,
+  ContextPacketGlobFile,
   ContextPacketMaterializedItem,
   ContextPacketOmittedItem,
   ContextPacketSource,
   RuntimeSupervisorContextRepairContext,
   ContextProvenance,
+  ContextPriorityBucket,
   PluginFileContextProvenance,
   WorkspaceFileContextProvenance,
   WorkspaceGlobContextProvenance
 } from "./packet.js";
+import { renderContextManifest } from "./manifest.js";
 import {
   aggregateDigest,
   createDigest
@@ -191,6 +194,57 @@ function appendPointerItem(
   accumulator.materials.push(item);
 }
 
+function priorityMetadata(options: {
+  bucket: ContextPriorityBucket;
+  reason: string;
+  sourceAuthoredOrder?: number;
+  broadReference?: boolean;
+}): Pick<ContextPacketMaterializedItem, "priority_bucket" | "priority_reason" | "source_authored_order" | "is_broad_reference"> {
+  return {
+    priority_bucket: options.bucket,
+    priority_reason: options.reason,
+    ...(options.sourceAuthoredOrder !== undefined ? { source_authored_order: options.sourceAuthoredOrder } : {}),
+    ...(options.broadReference !== undefined ? { is_broad_reference: options.broadReference } : {})
+  };
+}
+
+function applyPriorityRanks(materials: ContextPacketMaterializedItem[]): ContextPacketMaterializedItem[] {
+  const counts = new Map<ContextPriorityBucket, number>();
+  return materials.map((item) => {
+    const bucket = item.priority_bucket ?? "task_context";
+    const rank = counts.get(bucket) ?? 0;
+    counts.set(bucket, rank + 1);
+    return {
+      ...item,
+      priority_bucket: bucket,
+      priority_rank: item.priority_rank ?? rank
+    };
+  });
+}
+
+function materializedFileCount(item: ContextPacketMaterializedItem): number {
+  return item.glob_files?.length ?? 1;
+}
+
+function safeContextFileSegment(value: string): string {
+  const sanitized = value
+    .replace(/[^A-Za-z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "context";
+  if (sanitized.length <= 80) {
+    return sanitized;
+  }
+  const hash = createDigest(Buffer.from(value)).slice(0, 12);
+  const prefix = sanitized.slice(0, 64).replace(/_+$/g, "") || "context";
+  return `${prefix}_${hash}`;
+}
+
+function artifactPriorityBucket(reference: ArtifactContextItem): ContextPriorityBucket {
+  const text = `${reference.what} ${reference.why}`;
+  return /\b(current|repair|target|selected|immediate)\b/iu.test(text)
+    ? "current_work"
+    : "task_context";
+}
+
 async function materializeRepeatHistoryContext(
   options: ResolveContextOptions,
   accumulator: MaterializationAccumulator
@@ -234,7 +288,11 @@ async function materializeRepeatHistoryContext(
       key: history.source.name,
       source: history.source,
       description: history.description,
-      ...pointer
+      ...pointer,
+      ...priorityMetadata({
+        bucket: "progress_state",
+        reason: "Repeat history is runtime progress state for continuation."
+      })
     }
   );
 }
@@ -242,60 +300,59 @@ async function materializeRepeatHistoryContext(
 function renderSupervisorRecoveryEnvelope(envelope: SupervisorRecoveryEnvelope): string {
   const directive = envelope.retry_directive;
   const evidenceToRead = directive.evidence_to_read.filter(isAgentFacingEvidencePath);
+  const materialDelta = envelope.runtime_overlay?.material_delta ?? [];
+  const whatChanged = materialDelta.length > 0
+    ? materialDelta.map((delta) => `- ${delta.summary}`)
+    : envelope.resume_decision.evidence.length > 0
+      ? envelope.resume_decision.evidence.map((item) => `- ${item}`)
+      : ["- Supervisor selected a recovery boundary from the prior failure evidence."];
+  const preserve = [...new Set([...envelope.preserve_progress, ...envelope.resume_decision.reuse])];
+  const discard = [...new Set([...envelope.resume_decision.discard, ...directive.must_not_do, ...envelope.do_not_redo])];
+  const validation = [...new Set([...directive.validation_focus, ...envelope.resume_decision.validation_gate])];
   return [
     "# Supervisor Recovery Case",
     "",
-    "This node is being retried after a supervisor recovery cycle.",
+    "This is a retry. The original task contract is unchanged.",
     "The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.",
     "",
+    "## Prior Failure",
+    directive.summary,
+    "",
+    "## What Changed",
+    ...whatChanged,
+    "",
+    "## Required Next Action",
+    envelope.required_next_action,
+    "",
+    "## Read First",
+    ...(evidenceToRead.length > 0
+      ? evidenceToRead.map((item) => `- ${item}`)
+      : ["- Use the current context pointers, prior declared artifacts, and artifact status."]),
+    "",
+    "## Preserve Progress",
+    ...(preserve.length > 0
+      ? preserve.map((item) => `- ${item}`)
+      : ["- Preserve in-scope prior progress unless recovery evidence says it is unsafe."]),
+    "",
+    "## Discard / Do Not Redo",
+    ...(discard.length > 0
+      ? discard.map((item) => `- ${item}`)
+      : ["- Do not repeat the failed tactic without new evidence."]),
+    "",
+    "## Validation Before Completion",
+    ...(validation.length > 0
+      ? validation.map((item) => `- ${item}`)
+      : ["- Re-run the validation named by the original task when feasible."]),
+    "",
+    ...renderAttemptEvidenceMarkdown(envelope.prior_attempt_evidence),
+    "",
+    "## Audit Metadata",
     `- Classification: \`${envelope.classification}\``,
     `- Resume point: \`${envelope.resume_point}\``,
     `- Restart boundary: \`${envelope.resume_decision.restart_boundary}\``,
     `- Workspace decision: \`${envelope.workspace_decision}\``,
     `- Resume reason: \`${envelope.resume_decision.reason_code}\``,
-    `- Repeated matching symptom count: \`${envelope.repeated_fingerprint_count}\``,
-    "",
-    ...renderAttemptEvidenceMarkdown(envelope.prior_attempt_evidence),
-    "",
-    "## Recovery Summary",
-    directive.summary,
-    "",
-    "## Must Do",
-    ...directive.must_do.map((item) => `- ${item}`),
-    "",
-    "## Preserve Progress",
-    ...(envelope.preserve_progress.length > 0
-      ? envelope.preserve_progress.map((item) => `- ${item}`)
-      : ["- Preserve in-scope prior progress unless recovery evidence says it is unsafe."]),
-    "",
-    "## Reuse",
-    ...envelope.resume_decision.reuse.map((item) => `- ${item}`),
-    "",
-    "## Discard",
-    ...envelope.resume_decision.discard.map((item) => `- ${item}`),
-    "",
-    "## Must Not Do",
-    ...[...new Set([...directive.must_not_do, ...envelope.do_not_redo])].map((item) => `- ${item}`),
-    "",
-    "## Required Next Action",
-    envelope.required_next_action,
-    "",
-    "",
-    "## Evidence To Read",
-    ...(evidenceToRead.length > 0
-      ? evidenceToRead.map((item) => `- ${item}`)
-      : ["- Use the current context pointers, prior declared artifacts, and artifact status."]),
-    "",
-    "## Validation Focus",
-    ...directive.validation_focus.map((item) => `- ${item}`),
-    "",
-    "## Contract Preservation",
-    "- Goal: unchanged.",
-    "- Acceptance criteria: unchanged.",
-    "- Constraints: unchanged.",
-    "- Repo authority: unchanged.",
-    "- Sandbox: unchanged.",
-    "- Declared artifacts: unchanged."
+    `- Repeated matching symptom count: \`${envelope.repeated_fingerprint_count}\``
   ].join("\n");
 }
 
@@ -345,7 +402,11 @@ async function materializeSupervisorRecoveryEnvelopeContext(
       key: source.name,
       source,
       description,
-      ...pointer
+      ...pointer,
+      ...priorityMetadata({
+        bucket: "read_first",
+        reason: "Supervisor recovery guidance explains why this retry exists and what to do first."
+      })
     }
   );
 }
@@ -386,7 +447,11 @@ async function materializeSupervisorContextRepair(
         key: material.key,
         source,
         description: material.title,
-        ...pointer
+        ...pointer,
+        ...priorityMetadata({
+          bucket: "read_first",
+          reason: "Supervisor context repair replaces missing or misleading authored context for this retry."
+        })
       }
     );
   }
@@ -553,6 +618,11 @@ async function materializeWorkspaceFileContext(
       source: item,
       description: `${item.what} Why: ${item.why}`,
       ...pointer,
+      ...priorityMetadata({
+        bucket: "task_context",
+        reason: "Authored workspace file context for this task.",
+        sourceAuthoredOrder: index
+      }),
       binding: {
         kind: "live_workspace_input",
         requested_path: normalizedPath,
@@ -571,6 +641,52 @@ async function materializeWorkspaceFileContext(
     resolved_path: sourcePath,
     digest
   } satisfies WorkspaceFileContextProvenance);
+}
+
+function renderWorkspaceGlobIndex(options: {
+  key: string;
+  pattern: string;
+  matchCount: number;
+  includedCount: number;
+  omittedCount: number;
+  limit?: number;
+  ignoredRootsSkipped: readonly string[];
+  ignoredRootOptIn?: string;
+  files: Array<{
+    path: string;
+    resolved_path: string;
+    digest: string;
+    size_bytes: number;
+  }>;
+}): string {
+  const lines = [
+    `# Context Glob: ${options.key}`,
+    "",
+    `Pattern: \`${options.pattern}\``,
+    `Matches found: ${options.matchCount}`,
+    `Matches included: ${options.includedCount}`,
+    `Limit: ${options.limit ?? "none"}`,
+    `Ignored roots skipped: ${options.ignoredRootsSkipped.map((root) => `\`${root}\``).join(", ") || "none"}`,
+    `Explicit ignored-root opt-in: ${options.ignoredRootOptIn ? `\`${options.ignoredRootOptIn}\`` : "none"}`,
+    "",
+    "Use this as a reference set. Search or open files from this list when they are relevant to the task.",
+    ""
+  ];
+
+  if (options.omittedCount > 0) {
+    lines.push(
+      `This set was limited from ${options.matchCount} matches to ${options.includedCount} included files. If the needed file is not listed, use targeted workspace search inside the same pattern/scope before broad repository search.`,
+      ""
+    );
+  }
+
+  lines.push("| # | File | Size | Digest |");
+  lines.push("| --- | --- | ---: | --- |");
+  for (const [index, file] of options.files.entries()) {
+    lines.push(`| ${index + 1} | \`${file.path}\` | ${file.size_bytes} | \`${file.digest}\` |`);
+  }
+
+  return `${lines.join("\n")}\n`;
 }
 
 async function materializeWorkspaceGlobContext(
@@ -599,9 +715,8 @@ async function materializeWorkspaceGlobContext(
   const repoFiles = await listRepoFiles(repoRoot, cache.repo_files, {
     ...(ignoredRootOptIn ? { include_ignored_root: ignoredRootOptIn } : {})
   });
-  const matchedPaths = repoFiles
-    .filter((filePath) => matcher.test(filePath))
-    .slice(0, item.max_files ?? Number.MAX_SAFE_INTEGER);
+  const allMatchedPaths = repoFiles.filter((filePath) => matcher.test(filePath));
+  const matchedPaths = allMatchedPaths.slice(0, item.max_files ?? Number.MAX_SAFE_INTEGER);
 
   if (matchedPaths.length === 0) {
     throw contextFailure("unresolved_context", `Requested context workspace glob "${item.path}" matched no files after ignore filtering at execution time.`, {
@@ -610,9 +725,10 @@ async function materializeWorkspaceGlobContext(
     });
   }
 
-  const files: WorkspaceGlobContextProvenance["files"] = [];
+  const files: Array<WorkspaceGlobContextProvenance["files"][number] & { size_bytes: number }> = [];
+  const globFiles: ContextPacketGlobFile[] = [];
 
-  for (const [matchIndex, relativePath] of matchedPaths.entries()) {
+  for (const relativePath of matchedPaths) {
     const sourcePath = resolveContextSubpathWithinRoot(
       repoRoot,
       relativePath,
@@ -621,28 +737,70 @@ async function materializeWorkspaceGlobContext(
     const contents = await readFile(sourcePath);
     const digest = createDigest(contents);
     cache.file_digests.set(sourcePath, digest);
-    const pointerKey = `${key}_${matchIndex + 1}`;
-    appendPointerItem(
-      accumulator,
-      {
-        key: pointerKey,
-        source: item,
-        description: `${item.what} Why: ${item.why}`,
-        ...buildFilePointer(sourcePath, contents),
-        binding: {
-          kind: "live_workspace_input",
-          requested_path: relativePath,
-          resolved_path: sourcePath
-        }
-      }
-    );
-
+    const sizeBytes = contents.byteLength;
     files.push({
       path: relativePath,
       resolved_path: sourcePath,
-      digest
+      digest,
+      size_bytes: sizeBytes
+    });
+    globFiles.push({
+      path: relativePath,
+      resolved_path: sourcePath,
+      digest,
+      size_bytes: sizeBytes
     });
   }
+
+  const safeName = safeContextFileSegment(key);
+  const limit = item.max_files;
+  const omittedCount = Math.max(0, allMatchedPaths.length - matchedPaths.length);
+  const ignoredRootsSkipped = defaultContextIgnoredRoots.filter((root) => root !== ignoredRootOptIn);
+  const indexText = renderWorkspaceGlobIndex({
+    key,
+    pattern: normalizedPattern,
+    matchCount: allMatchedPaths.length,
+    includedCount: matchedPaths.length,
+    omittedCount,
+    ...(limit !== undefined ? { limit } : {}),
+    ignoredRootsSkipped,
+    ...(ignoredRootOptIn ? { ignoredRootOptIn } : {}),
+    files
+  });
+  const pointer = await writeRuntimeContextFile(
+    join(
+      options.execution_dir,
+      "context",
+      "runtime",
+      "globs",
+      `${safeName}.md`
+    ),
+    indexText
+  );
+
+  appendPointerItem(
+    accumulator,
+    {
+      key,
+      source: item,
+      description: `${item.what} Why: ${item.why}`,
+      ...pointer,
+      ...priorityMetadata({
+        bucket: "reference_set",
+        reason: "Authored workspace glob context; use as a selective search/open index.",
+        sourceAuthoredOrder: index,
+        broadReference: true
+      }),
+      glob_pattern: normalizedPattern,
+      match_count: allMatchedPaths.length,
+      included_count: matchedPaths.length,
+      omitted_count: omittedCount,
+      ...(limit !== undefined ? { glob_limit: limit } : {}),
+      ignored_roots_skipped: ignoredRootsSkipped,
+      ...(ignoredRootOptIn ? { explicit_ignored_root_opt_in: ignoredRootOptIn } : {}),
+      glob_files: globFiles
+    }
+  );
 
   contextProvenance.push({
     from: "workspace_glob",
@@ -685,7 +843,12 @@ async function materializePluginFileContext(
       key,
       source: item,
       description: `${item.what} Why: ${item.why}`,
-      ...pointer
+      ...pointer,
+      ...priorityMetadata({
+        bucket: "task_context",
+        reason: "Authored plugin file context for this task.",
+        sourceAuthoredOrder: index
+      })
     }
   );
 
@@ -751,7 +914,11 @@ async function materializeArtifactContext(
   reference: ArtifactContextItem,
   index: number,
   options: ResolveContextOptions,
-  accumulator: MaterializationAccumulator
+  accumulator: MaterializationAccumulator,
+  priorityOverride?: {
+    bucket: ContextPriorityBucket;
+    reason: string;
+  }
 ): Promise<void> {
   const compiledIds = options.compiled_graph.authored_to_compiled[reference.node] ?? [];
   const description = describeArtifactReference(options.compiled_graph, compiledIds, reference);
@@ -822,7 +989,12 @@ async function materializeArtifactContext(
       key,
       source: reference,
       description: supportDescription,
-      ...buildFilePointer(sourcePath, contents)
+      ...buildFilePointer(sourcePath, contents),
+      ...priorityMetadata({
+        bucket: priorityOverride?.bucket ?? artifactPriorityBucket(reference),
+        reason: priorityOverride?.reason ?? "Declared artifact context for this task.",
+        ...(index >= 0 ? { sourceAuthoredOrder: index } : {})
+      })
     }
   );
 }
@@ -857,48 +1029,12 @@ async function materializeCheckpointReviewContext(
     },
     -1,
     options,
-    accumulator
-  );
-}
-
-function renderContextManifest(packet: ContextPacket): string {
-  const lines = [
-    "# Context Manifest",
-    "",
-    "Context entries are pointers. Agentflow does not copy or truncate source context into this prompt package.",
-    ""
-  ];
-
-  if (packet.materials.length > 0) {
-    lines.push("## Pointers", "");
-    lines.push("| Name | Kind | Pointer | What | Why |");
-    lines.push("| --- | --- | --- | --- | --- |");
-
-    for (const item of packet.materials) {
-      const from = "ref" in item.source ? "artifact" : item.source.from;
-      const what = "what" in item.source && typeof item.source.what === "string"
-        ? item.source.what
-        : item.description ?? "";
-      const why = "why" in item.source && typeof item.source.why === "string"
-        ? item.source.why
-        : "";
-      lines.push(`| \`${item.key}\` | \`${from}\` | \`${formatManifestPointerPath(item.pointer_path)}\` | ${what} | ${why} |`);
+    accumulator,
+    {
+      bucket: "read_first",
+      reason: "Checkpoint review artifact is the first evidence the operator must inspect."
     }
-
-    lines.push("");
-  } else {
-    lines.push("No context pointers were provided for this node.", "");
-  }
-
-  return `${lines.join("\n")}\n`;
-}
-
-function formatManifestPointerPath(pointerPath: string): string {
-  const match = /[/\\]context[/\\]runtime[/\\](.+)$/u.exec(pointerPath);
-  if (!match?.[1]) {
-    return pointerPath;
-  }
-  return `runtime/${match[1].replace(/\\/gu, "/")}`;
+  );
 }
 
 export async function resolveExecutionContext(
@@ -963,17 +1099,18 @@ export async function resolveExecutionContext(
     ...(harness_instructions ? { harness_instructions } : {})
   };
 
+  const materials = applyPriorityRanks(accumulator.materials);
   const packet: ContextPacket = {
     execution_id: options.execution_id,
     compiled_id: options.node.compiled_id,
     authored_id: options.node.authored_id,
     repo_alias: options.node.repo,
     workspace_path: options.workspace_path,
-    materials: accumulator.materials,
+    materials,
     omitted: accumulator.omitted,
     totals: {
-      pointer_count: accumulator.materials.length,
-      file_count: accumulator.materials.length
+      pointer_count: materials.length,
+      file_count: materials.reduce((count, item) => count + materializedFileCount(item), 0)
     }
   };
 

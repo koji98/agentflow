@@ -31,6 +31,12 @@ import { prepareAgentTools } from "../runtime/tools/setup.js";
 import { startSpawnBroker } from "../runtime/harness/spawn_broker.js";
 import { buildHarnessSpawnEnv, formatToolContract } from "../runtime/harness/types.js";
 import type { AgentInvocation } from "../runtime/harness/types.js";
+import {
+  extractOrientationModeFromStdout,
+  summarizeOrientInvocations,
+  type RuntimeOrientationMode,
+  type RuntimeOrientationSummary
+} from "../runtime/orientation.js";
 import { buildRequirementEvidenceMap, selectEvidenceMapDelta } from "../supervisor/evidence_map.js";
 import type { SupervisorCaseFile, SupervisorRecoveryEnvelope } from "../supervisor/types.js";
 import {
@@ -38,6 +44,7 @@ import {
   helperPurposes,
   milestoneLogKinds,
   persistCompletionPacket,
+  type CompletionPacket,
   type HelperPurpose,
   type RuntimeLogEntry,
   type RuntimeMilestone,
@@ -266,6 +273,12 @@ async function appendAfInvocation(options: {
       exit_code: options.exitCode,
       duration_ms: options.durationMs,
       ...sidecars,
+      ...(options.argv.length === 1 && options.argv[0] === "orient"
+        ? (() => {
+            const mode = extractOrientationModeFromStdout(options.stdout);
+            return mode ? { orientation_mode: mode } : {};
+          })()
+        : {}),
       ...(options.error ? { error: options.error } : {}),
       redaction: "secret-looking argv values redacted"
     });
@@ -426,6 +439,28 @@ function renderMilestoneList(milestones: RuntimeMilestone[]): string {
   ].join("\n");
 }
 
+function milestoneCompleteCommand(id: string): string {
+  return `af milestone complete ${id} --evidence <text>`;
+}
+
+function milestoneBlockCommand(id: string): string {
+  return `af milestone block ${id} --blocked-on <text> --recoverable-by <text> --evidence <text>`;
+}
+
+function renderMilestoneNextActions(milestones: RuntimeMilestone[]): string[] {
+  const active = milestones.filter((milestone) => milestone.status === "active");
+  if (active.length === 0) {
+    return [];
+  }
+
+  return [
+    "## Milestone Next Actions",
+    ...active.map((milestone) =>
+      `- \`${milestone.id}\`: complete with \`${milestoneCompleteCommand(milestone.id)}\` or block with \`${milestoneBlockCommand(milestone.id)}\`.`
+    )
+  ];
+}
+
 function requireRuntimeMetadata(): RuntimeMetadata {
   const metadataPath = process.env.AGENTFLOW_RUNTIME_METADATA;
   if (!metadataPath) {
@@ -433,6 +468,19 @@ function requireRuntimeMetadata(): RuntimeMetadata {
   }
 
   return JSON.parse(readFileSync(metadataPath, "utf8")) as RuntimeMetadata;
+}
+
+function optionalRuntimeMetadata(): RuntimeMetadata | undefined {
+  const metadataPath = process.env.AGENTFLOW_RUNTIME_METADATA;
+  if (!metadataPath) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(readFileSync(metadataPath, "utf8")) as RuntimeMetadata;
+  } catch {
+    return undefined;
+  }
 }
 
 function afCommandPolicyFailure(metadata: RuntimeMetadata, argv: string[]): AfResult | undefined {
@@ -849,6 +897,19 @@ function renderList(values: string[] | undefined, empty: string): string[] {
   return values && values.length > 0 ? values.map((value) => `- ${value}`) : [`- ${empty}`];
 }
 
+function uniqueStrings(values: Array<string | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => typeof value === "string" && value.trim().length > 0))];
+}
+
+function isAgentFacingRecoveryPath(value: string): boolean {
+  if (value.trim().length === 0) {
+    return false;
+  }
+  return !/(^|[/\\])(human-debug|runtime)([/\\]|$)/u.test(value)
+    && !/(^|[/\\])agent[/\\](prompt|context|response)\.md$/u.test(value)
+    && !/(^|[/\\])(case-file|recovery-plan|recovery-envelope)\.json$/u.test(value);
+}
+
 function renderRetryOrientation(
   metadata: RuntimeMetadata,
   attemptMemory: AttemptMemory | undefined
@@ -858,60 +919,96 @@ function renderRetryOrientation(
     return [];
   }
 
+  const failureSummary =
+    attemptMemory?.failure_summary ??
+    envelope?.retry_directive.summary ??
+    "Supervisor scheduled this retry after the previous attempt failed.";
+  const materialDelta = envelope?.runtime_overlay?.material_delta ?? [];
+  const whatChanged = materialDelta.length > 0
+    ? materialDelta.map((delta) => delta.summary)
+    : attemptMemory?.resume_decision.evidence.length
+      ? attemptMemory.resume_decision.evidence
+      : envelope?.resume_decision.evidence.length
+        ? envelope.resume_decision.evidence
+        : ["Supervisor selected a recovery boundary from the prior failure evidence."];
+  const requiredNextAction =
+    attemptMemory?.required_next_action ??
+    envelope?.required_next_action ??
+    "Inspect current artifact status and continue within the unchanged contract.";
+  const evidenceToRead = uniqueStrings([
+    ...(attemptMemory?.evidence_to_read ?? []),
+    ...(envelope?.retry_directive.evidence_to_read ?? [])
+  ]).filter(isAgentFacingRecoveryPath);
+  const preserve = uniqueStrings([
+    ...(attemptMemory?.preserve_progress ?? []),
+    ...(attemptMemory?.resume_decision.reuse ?? []),
+    ...(envelope?.preserve_progress ?? []),
+    ...(envelope?.resume_decision.reuse ?? [])
+  ]);
+  const discard = uniqueStrings([
+    ...(attemptMemory?.resume_decision.discard ?? []),
+    ...(attemptMemory?.do_not_redo ?? []),
+    ...(envelope?.resume_decision.discard ?? []),
+    ...(envelope?.retry_directive.must_not_do ?? []),
+    ...(envelope?.do_not_redo ?? [])
+  ]);
+  const validation = uniqueStrings([
+    ...(attemptMemory?.resume_decision.validation_gate ?? []),
+    ...(envelope?.retry_directive.validation_focus ?? []),
+    ...(envelope?.resume_decision.validation_gate ?? [])
+  ]);
+  const resumeDecision = attemptMemory?.resume_decision ?? envelope?.resume_decision;
+  const priorAttemptEvidence = attemptMemory?.prior_attempt_evidence ?? envelope?.prior_attempt_evidence;
+  const retryLines = [
+    "## Retry Orientation",
+    "This is a retry. The original task contract is unchanged.",
+    "",
+    "### Prior Failure",
+    failureSummary,
+    "",
+    "### What Changed",
+    ...whatChanged.map((item) => `- ${item}`),
+    "",
+    "### Do Next",
+    `- ${requiredNextAction}`,
+    "",
+    "### Read First",
+    ...renderList(evidenceToRead, "Use the current context pointers, prior declared artifacts, and artifact status."),
+    "",
+    "### Preserve",
+    ...renderList(preserve, "Preserve in-scope prior progress unless recovery evidence says it is unsafe."),
+    "",
+    "### Discard / Do Not Redo",
+    ...renderList(discard, "Do not repeat the failed tactic without new evidence."),
+    "",
+    "### Validation Before Completion",
+    ...renderList(validation, "Run the validation named by the original task when feasible."),
+    ...(priorAttemptEvidence
+      ? [
+          "",
+          ...renderAttemptEvidenceMarkdown(priorAttemptEvidence, { heading: "### Prior Attempt Evidence" })
+        ]
+      : []),
+    "",
+    "### Audit Metadata",
+    `- Resume point: \`${attemptMemory?.resume_point ?? envelope?.resume_point ?? "fresh_retry"}\``,
+    `- Restart boundary: \`${resumeDecision?.restart_boundary ?? "node_attempt"}\``,
+    `- Workspace decision: \`${attemptMemory?.workspace_decision ?? envelope?.workspace_decision ?? "preserve"}\``,
+    `- Resume reason: \`${resumeDecision?.reason_code ?? "fresh_retry_required"}\``,
+    ...(envelope ? [`- Repeated matching symptom count: \`${envelope.repeated_fingerprint_count}\``] : [])
+  ];
+
   if (!attemptMemory) {
     return [
-      "## Retry Orientation",
+      ...retryLines,
+      "",
       "- Structured attempt memory is unavailable; use the supervisor recovery summary and current artifact status before material work.",
-      `- Supervisor decision: ${envelope?.retry_directive.summary ?? "recovery retry"}`,
-      `- Resume point: \`${envelope?.resume_point ?? "fresh_retry"}\``,
-      `- Restart boundary: \`${envelope?.resume_decision.restart_boundary ?? "node_attempt"}\``,
-      `- Workspace decision: \`${envelope?.workspace_decision ?? "preserve"}\``,
-      `- Resume reason: \`${envelope?.resume_decision.reason_code ?? "fresh_retry_required"}\``,
-      `- Required next action: ${envelope?.required_next_action ?? "Inspect current artifact status and continue within the unchanged contract."}`,
-      ...(envelope
-        ? [
-            "",
-            ...renderAttemptEvidenceMarkdown(envelope.prior_attempt_evidence, { heading: "### Prior Attempt Evidence" })
-          ]
-        : []),
-      "",
-      "### Reuse",
-      ...renderList(envelope?.resume_decision.reuse, "Use current context pointers and artifact status."),
-      "",
-      "### Do Not Redo",
-      ...renderList(envelope?.do_not_redo, "Do not restart from scratch unless prior progress is unsafe or irrelevant.")
     ];
   }
 
   const phaseHistory = attemptMemory.phase_history ?? [];
   return [
-    "## Retry Orientation",
-    "| Field | Value |",
-    "| --- | --- |",
-    `| Failure symptom | ${markdownCell(attemptMemory.failure_summary)} |`,
-    `| Supervisor decision | ${markdownCell(envelope?.retry_directive.summary ?? attemptMemory.failure_summary)} |`,
-    `| Resume point | \`${attemptMemory.resume_point}\` |`,
-    `| Restart boundary | \`${attemptMemory.resume_decision.restart_boundary}\` |`,
-    `| Workspace decision | \`${attemptMemory.workspace_decision}\` |`,
-    `| Resume reason | \`${attemptMemory.resume_decision.reason_code}\` |`,
-    `| Required next action | ${markdownCell(attemptMemory.required_next_action)} |`,
-    "",
-    ...renderAttemptEvidenceMarkdown(attemptMemory.prior_attempt_evidence, { heading: "### Prior Attempt Evidence" }),
-    "",
-    "### Reuse",
-    ...renderList(attemptMemory.resume_decision.reuse, "No prior progress was selected for reuse."),
-    "",
-    "### Discard",
-    ...renderList(attemptMemory.resume_decision.discard, "No prior progress was selected for discard."),
-    "",
-    "### Validation Gate",
-    ...renderList(attemptMemory.resume_decision.validation_gate, "Run the validation named by the original task when feasible."),
-    "",
-    "### Preserved Progress",
-    ...renderList(attemptMemory.preserve_progress, "No preserved prior progress was identified."),
-    "",
-    "### Forbidden Redo",
-    ...renderList(attemptMemory.do_not_redo, "Do not restart from scratch unless prior progress is unsafe or irrelevant."),
+    ...retryLines,
     "",
     "## Prior Attempt Memory",
     "Timeline:",
@@ -971,15 +1068,102 @@ function renderManagedContractFailureOrientation(
   ];
 }
 
+function chooseOrientationMode(options: {
+  priorOrientation: RuntimeOrientationSummary;
+  hasRecovery: boolean;
+}): RuntimeOrientationMode {
+  if (options.hasRecovery) {
+    return "recovery_focus";
+  }
+  return options.priorOrientation.orient_call_count > 0 ? "refresh_full" : "startup_restore";
+}
+
+function hasManagedContractFailure(packet: ManagedContractFailurePacket | undefined): boolean {
+  return Boolean(packet && packet.findings.length > 0);
+}
+
+function manifestSection(manifest: string, heading: string): string {
+  const pattern = new RegExp(`^## ${heading.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\s*$`, "imu");
+  const match = pattern.exec(manifest);
+  if (!match) {
+    return "";
+  }
+  const start = (match.index ?? 0) + match[0].length;
+  const rest = manifest.slice(start);
+  const next = /^\s*##\s+/mu.exec(rest);
+  return next ? rest.slice(0, next.index) : rest;
+}
+
+function parseMarkdownTableRows(section: string): string[][] {
+  return section
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("| `"))
+    .map((line) =>
+      line
+        .slice(1, -1)
+        .split("|")
+        .map((cell) => cell.trim().replace(/^`|`$/gu, ""))
+    );
+}
+
+function rowNames(rows: string[][]): string[] {
+  return rows.map((row) => row[0]).filter((name): name is string => Boolean(name));
+}
+
+function renderOrientationContextSummary(manifest: string): string[] {
+  const trimmed = manifest.trim();
+  if (trimmed.length === 0) {
+    return ["## Context Pointers", "No context pointers."];
+  }
+  const sectionNames = ["Read First", "Current Work", "Task Context", "Progress State", "Reference Sets"];
+  const hasPrioritySections = sectionNames.some((section) => manifestSection(trimmed, section).trim().length > 0);
+  if (!hasPrioritySections) {
+    return ["## Context Pointers", trimmed];
+  }
+
+  const readFirst = parseMarkdownTableRows(manifestSection(trimmed, "Read First"));
+  const currentWork = parseMarkdownTableRows(manifestSection(trimmed, "Current Work"));
+  const taskContext = parseMarkdownTableRows(manifestSection(trimmed, "Task Context"));
+  const progressState = parseMarkdownTableRows(manifestSection(trimmed, "Progress State"));
+  const referenceSets = parseMarkdownTableRows(manifestSection(trimmed, "Reference Sets"));
+  const lines = [
+    "## Context Summary",
+    "Open read-first pointers before broad search unless the task clearly requires discovery. Use reference sets as search spaces, not as linear reading lists."
+  ];
+
+  if (readFirst.length > 0) {
+    lines.push(`- Read first: ${rowNames(readFirst).map((name) => `\`${name}\``).join(", ")}`);
+  }
+  if (currentWork.length > 0) {
+    lines.push(`- Current work: ${rowNames(currentWork).map((name) => `\`${name}\``).join(", ")}`);
+  }
+  if (taskContext.length > 0) {
+    lines.push(`- Task context: ${rowNames(taskContext).map((name) => `\`${name}\``).join(", ")}`);
+  }
+  if (progressState.length > 0) {
+    lines.push(`- Progress state: ${rowNames(progressState).map((name) => `\`${name}\``).join(", ")}`);
+  }
+  if (referenceSets.length > 0) {
+    lines.push(`- Reference sets: ${referenceSets.map((row) => `\`${row[0]}\`${row[3] ? ` (${row[3]})` : ""}`).join(", ")}`);
+  }
+
+  return lines;
+}
+
 async function commandOrient(metadata: RuntimeMetadata): Promise<AfResult> {
   const executionDir = dirname(metadata.output_dir);
-  const [graph, state, observations, milestoneState, manifest, managedContractFailure] = await Promise.all([
+  const [graph, state, observations, milestoneState, manifest, managedContractFailure, priorOrientation] = await Promise.all([
     readCompiledGraph(metadata.run_root).catch(() => undefined),
     readRunState(metadata.run_root).catch(() => undefined),
     readOperatorObservations(metadata.run_root),
     readMilestoneState(metadata),
     readFile(metadata.context_manifest_path, "utf8").catch(() => ""),
-    readManagedContractFailurePacket(executionDir).catch(() => undefined)
+    readManagedContractFailurePacket(executionDir).catch(() => undefined),
+    summarizeOrientInvocations({
+      executionId: metadata.execution_id,
+      ...(metadata.tool_invocations_path ? { toolInvocationsPath: metadata.tool_invocations_path } : {})
+    })
   ]);
   const attemptMemory = metadata.attempt_memory_path
     ? await readJsonFile<AttemptMemory>(metadata.attempt_memory_path).catch(() => undefined)
@@ -995,8 +1179,32 @@ async function commandOrient(metadata: RuntimeMetadata): Promise<AfResult> {
   const goal = node?.intent.goal ?? `Complete node ${metadata.node_id}.`;
   const acceptanceCriteria = node?.intent.acceptance_criteria ?? [];
   const constraints = node?.intent.constraints ?? [];
+  const hasRecovery = Boolean(metadata.supervisor_recovery_envelope || attemptMemory);
+  const orientationMode = chooseOrientationMode({ priorOrientation, hasRecovery });
+  const hasDynamicRuntimeState =
+    hasRecovery ||
+    activeObservations.length > 0 ||
+    milestoneState.milestones.length > 0 ||
+    hasManagedContractFailure(managedContractFailure);
+  if (orientationMode === "startup_restore" && !hasDynamicRuntimeState) {
+    return {
+      exitCode: 0,
+      stdout: [
+        "# Agentflow Orientation",
+        "",
+        `Orientation mode: \`${orientationMode}\``,
+        "",
+        "No recovery, blockers, or prior progress are active.",
+        "",
+        "Do the task from the prompt. Record real progress and validation as you work, then run `af complete check` before final response."
+      ].join("\n") + "\n"
+    };
+  }
+  const milestoneNextActions = renderMilestoneNextActions(milestoneState.milestones);
   const lines = [
     "# Agentflow Orientation",
+    "",
+    `Orientation mode: \`${orientationMode}\``,
     "",
     ...renderRetryOrientation(metadata, attemptMemory),
     ...(metadata.supervisor_recovery_envelope || attemptMemory ? [""] : []),
@@ -1013,8 +1221,7 @@ async function commandOrient(metadata: RuntimeMetadata): Promise<AfResult> {
     "- Constraints:",
     ...(constraints.length > 0 ? constraints.map((item) => `  - ${item}`) : ["  - None authored."]),
     "",
-    "## Context Pointers",
-    manifest.trim().length > 0 ? manifest.trim() : "No context pointers.",
+    ...renderOrientationContextSummary(manifest),
     "",
     "## Active Runtime State",
     `- Supervisor recovery: ${metadata.supervisor_recovery_envelope ? metadata.supervisor_recovery_envelope.retry_directive.summary : "none"}`,
@@ -1030,7 +1237,10 @@ async function commandOrient(metadata: RuntimeMetadata): Promise<AfResult> {
     ...renderToolSummary(metadata, node),
     "",
     "## Milestones",
-    renderMilestoneList(milestoneState.milestones)
+    renderMilestoneList(milestoneState.milestones),
+    ...(milestoneNextActions.length > 0
+      ? ["", ...milestoneNextActions]
+      : [])
   ];
 
   return {
@@ -1104,6 +1314,34 @@ function agentFacingArtifactSummary(
     status: artifact.status,
     current_attempt: artifact.current_attempt
   }));
+}
+
+function agentFacingOrientationSummary(summary: RuntimeOrientationSummary): Omit<RuntimeOrientationSummary, "evidence_ref"> {
+  return {
+    orient_called: summary.orient_called,
+    orient_call_count: summary.orient_call_count,
+    ...(summary.first_orient_at ? { first_orient_at: summary.first_orient_at } : {}),
+    ...(summary.last_orient_at ? { last_orient_at: summary.last_orient_at } : {}),
+    modes_seen: summary.modes_seen
+  };
+}
+
+function agentFacingNextActions(packet: CompletionPacket): string[] {
+  const actions: string[] = [];
+  if (!packet.orientation.orient_called) {
+    actions.push("Run `af orient` before continuing.");
+  }
+  for (const milestone of packet.milestones.milestones) {
+    if (milestone.status === "active") {
+      actions.push(
+        `Complete active milestone ${milestone.id} with \`${milestoneCompleteCommand(milestone.id)}\` or block it with \`${milestoneBlockCommand(milestone.id)}\`.`
+      );
+    }
+  }
+  for (const name of packet.missing_artifacts) {
+    actions.push(`Publish missing artifact ${name} with \`af artifact write ${name}\`.`);
+  }
+  return [...new Set(actions)];
 }
 
 function completionPacketPathForMetadata(metadata: RuntimeMetadata): string {
@@ -1180,10 +1418,12 @@ async function commandCompleteCheck(metadata: RuntimeMetadata): Promise<AfResult
       missing_artifacts: packet.missing_artifacts,
       artifact_findings: packet.artifact_findings,
       validation_evidence: packet.validation_evidence,
+      orientation: agentFacingOrientationSummary(packet.orientation),
       operator_observations: packet.operator_observations,
       active_blockers: packet.active_blockers,
       supervisor_recovery: packet.supervisor_recovery,
-      managed: packet.managed
+      managed: packet.managed,
+      next_actions: agentFacingNextActions(packet)
     }
   };
   });
@@ -2078,11 +2318,11 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
     "- Use `af orient` to inspect this helper session.",
     "- Understand the helper task and relevant parent context before committing to execution milestones.",
     "- Use `af milestone add`, `af milestone log`, and `af milestone complete` to track macro progress with evidence.",
-    "- Use `af artifact write <name>` to publish the required artifact from stdin, or `af artifact write <name> --file <path>` for an existing workspace/output file.",
+    `- Use \`af artifact write ${artifactName}\` to publish the required artifact from stdin, or \`af artifact write ${artifactName} --file <path>\` for an existing workspace/output file.`,
     ...(toolContract.length > 0 ? ["", ...toolContract] : []),
     "",
     "## Completion Gate",
-    "Before the final response: orient, complete every helper milestone, publish the required artifact, and keep the handoff to outcome, artifact, validation, and blockers."
+    `Before the final response: run \`af orient\`, complete every helper milestone, publish the required artifact with \`af artifact write ${artifactName}\`, then run \`af complete check\`.`
   ].join("\n");
   const promptPath = session.prompt_path ?? join(dirname(helperPath(parentMetadata, helperId)), "prompt.md");
   const promptBody = `${prompt}\n`;
@@ -2302,6 +2542,13 @@ export async function executeAfCli(argv: string[]): Promise<AfResult> {
     return { exitCode: 0, stdout: renderHelp() };
   }
   if (options.help === true) {
+    const metadata = optionalRuntimeMetadata();
+    if (metadata) {
+      const policyFailure = afCommandPolicyFailure(metadata, positionals);
+      if (policyFailure) {
+        return policyFailure;
+      }
+    }
     return { exitCode: 0, stdout: renderCommandHelp(positionals) };
   }
 

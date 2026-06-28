@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { dirname, join } from "node:path";
 
 import {
@@ -15,7 +16,15 @@ import {
   readRunState
 } from "../artifacts/reader.js";
 import type { CompiledExecutableNode } from "../graph/compiled.js";
-import type { EvalTraceArtifact, EvalTraceAttempt, EvalTracePacket, EvalTrajectoryEvent } from "./types.js";
+import type {
+  EvalTraceArtifact,
+  EvalTraceAttempt,
+  EvalTracePacket,
+  EvalTracePromptDiagnosticEntry,
+  EvalTracePromptDiagnosticsSummary,
+  EvalTraceRecoveryLearning,
+  EvalTrajectoryEvent
+} from "./types.js";
 
 function jsonLine(value: unknown): string {
   return `${JSON.stringify(value)}\n`;
@@ -80,6 +89,18 @@ function readRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function readNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
 async function readAttemptToolInvocations(attempts: Array<{
   execution_id?: string;
   compiled_id?: string;
@@ -124,6 +145,143 @@ async function readAttemptCompletionPackets(attempts: Array<{
     return packet ? [{ attempt, packet, packet_path: packetPath }] : [];
   }));
   return packetGroups.flat();
+}
+
+const promptDiagnosticsTraversalSkips = new Set([
+  ".git",
+  ".agentflow",
+  "node_modules",
+  ".venv",
+  "venv",
+  ".tox",
+  "dist",
+  "build",
+  "coverage",
+  "workspaces",
+  "workspace",
+  "repo"
+]);
+
+async function collectPromptDiagnosticsFiles(root: string): Promise<string[]> {
+  let entries: Dirent[];
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const nested = await Promise.all(entries.map(async (entry) => {
+    const path = join(root, entry.name);
+    if (entry.isFile() && entry.name === "prompt-diagnostics.json") {
+      return [path];
+    }
+    if (!entry.isDirectory() || promptDiagnosticsTraversalSkips.has(entry.name)) {
+      return [];
+    }
+    return collectPromptDiagnosticsFiles(path);
+  }));
+
+  return nested.flat().sort((left, right) => left.localeCompare(right));
+}
+
+function summarizePromptDiagnostic(path: string, value: unknown): EvalTracePromptDiagnosticEntry | undefined {
+  const record = readRecord(value);
+  if (!record) {
+    return undefined;
+  }
+  const totalChars = readNumber(record.total_chars);
+  const contextPointerCount = readNumber(record.context_pointer_count);
+  const contextReadFirstCount = readNumber(record.context_read_first_count);
+  const contextGlobSetCount = readNumber(record.context_glob_set_count);
+  const contextGlobMatchCount = readNumber(record.context_glob_match_count);
+  const contextGlobIncludedCount = readNumber(record.context_glob_included_count);
+  const contextLimitedGlobCount = readNumber(record.context_limited_glob_count);
+
+  return {
+    path,
+    ...(typeof record.prompt_kind === "string" ? { prompt_kind: record.prompt_kind } : {}),
+    ...(typeof record.renderer === "string" ? { renderer: record.renderer } : {}),
+    ...(totalChars !== undefined ? { total_chars: totalChars } : {}),
+    ...(contextPointerCount !== undefined ? { context_pointer_count: contextPointerCount } : {}),
+    ...(contextReadFirstCount !== undefined ? { context_read_first_count: contextReadFirstCount } : {}),
+    ...(contextGlobSetCount !== undefined ? { context_glob_set_count: contextGlobSetCount } : {}),
+    ...(contextGlobMatchCount !== undefined ? { context_glob_match_count: contextGlobMatchCount } : {}),
+    ...(contextGlobIncludedCount !== undefined ? { context_glob_included_count: contextGlobIncludedCount } : {}),
+    ...(contextLimitedGlobCount !== undefined ? { context_limited_glob_count: contextLimitedGlobCount } : {}),
+    ...(typeof record.has_supervisor_recovery === "boolean" ? { has_supervisor_recovery: record.has_supervisor_recovery } : {}),
+    warnings: readStringArray(record.warnings)
+  };
+}
+
+async function collectPromptDiagnostics(runRoot: string): Promise<EvalTracePromptDiagnosticsSummary> {
+  const files = await collectPromptDiagnosticsFiles(runRoot);
+  const entries = (await Promise.all(files.map(async (path) =>
+    summarizePromptDiagnostic(path, await readOptionalJson(path))
+  ))).filter((entry): entry is EvalTracePromptDiagnosticEntry => entry !== undefined);
+  const warningCounts: Record<string, number> = {};
+
+  for (const warning of entries.flatMap((entry) => entry.warnings)) {
+    warningCounts[warning] = (warningCounts[warning] ?? 0) + 1;
+  }
+
+  const totalChars = entries.reduce((sum, entry) => sum + (entry.total_chars ?? 0), 0);
+  const maxPromptChars = entries.reduce((max, entry) => Math.max(max, entry.total_chars ?? 0), 0);
+
+  return {
+    count: entries.length,
+    total_chars: totalChars,
+    max_prompt_chars: maxPromptChars,
+    context_pointer_count: entries.reduce((sum, entry) => sum + (entry.context_pointer_count ?? 0), 0),
+    context_read_first_count: entries.reduce((sum, entry) => sum + (entry.context_read_first_count ?? 0), 0),
+    context_glob_set_count: entries.reduce((sum, entry) => sum + (entry.context_glob_set_count ?? 0), 0),
+    context_glob_match_count: entries.reduce((sum, entry) => sum + (entry.context_glob_match_count ?? 0), 0),
+    context_glob_included_count: entries.reduce((sum, entry) => sum + (entry.context_glob_included_count ?? 0), 0),
+    context_limited_glob_count: entries.reduce((sum, entry) => sum + (entry.context_limited_glob_count ?? 0), 0),
+    warnings: Object.keys(warningCounts).sort((left, right) => left.localeCompare(right)),
+    warning_counts: warningCounts,
+    entries
+  };
+}
+
+function summarizeRecoveryLearning(interventions: Array<{
+  evidence?: unknown;
+}>): EvalTraceRecoveryLearning[] {
+  const records: EvalTraceRecoveryLearning[] = [];
+
+  for (const intervention of interventions) {
+    const evidence = readRecord(intervention.evidence);
+    const learning = readRecord(evidence?.recovery_learning);
+    if (!learning) {
+      continue;
+    }
+
+    const record: EvalTraceRecoveryLearning = {};
+    const diagnosis = readString(learning.diagnosis);
+    const followedRequiredNextAction = readString(learning.followed_required_next_action);
+    const followedValidationGate = readString(learning.followed_validation_gate);
+    const materialDeltaUsed = readString(learning.material_delta_used);
+    const repeatedForbiddenTactic = readString(learning.repeated_forbidden_tactic);
+
+    if (diagnosis) {
+      record.diagnosis = diagnosis;
+    }
+    if (followedRequiredNextAction) {
+      record.followed_required_next_action = followedRequiredNextAction;
+    }
+    if (followedValidationGate) {
+      record.followed_validation_gate = followedValidationGate;
+    }
+    if (materialDeltaUsed) {
+      record.material_delta_used = materialDeltaUsed;
+    }
+    if (repeatedForbiddenTactic) {
+      record.repeated_forbidden_tactic = repeatedForbiddenTactic;
+    }
+
+    records.push(record);
+  }
+
+  return records;
 }
 
 function afCommandFromInvocation(record: Record<string, unknown>): string | undefined {
@@ -229,6 +387,9 @@ export async function buildEvalTracePacket(options: {
     readAttemptToolInvocations(attempts),
     readAttemptCompletionPackets(attempts)
   ]);
+  const [promptDiagnostics] = await Promise.all([
+    collectPromptDiagnostics(options.run_root)
+  ]);
   const artifacts: EvalTraceArtifact[] = [];
 
   for (const attempt of attempts) {
@@ -248,6 +409,7 @@ export async function buildEvalTracePacket(options: {
   const applyActions = new Set<string>();
   const resumeDecisions: EvalTracePacket["supervisor"]["resume_decisions"] = [];
   const interventionDecisions: EvalTracePacket["supervisor"]["intervention_decisions"] = [];
+  const recoveryLearning = summarizeRecoveryLearning(interventions);
   const interventionEvents = eventRecords.filter((event) =>
     typeof event.type === "string" && (event.type.includes("intervention") || event.type.includes("supervisor"))
   );
@@ -444,11 +606,13 @@ export async function buildEvalTracePacket(options: {
       apply_actions: [...applyActions],
       resume_decisions: resumeDecisions,
       intervention_decisions: interventionDecisions,
+      recovery_learning: recoveryLearning,
       intervention_count: interventionEvents.length,
       recovery_count: interventionEvents.filter((event) =>
         typeof event.type === "string" && event.type.includes("intervention")
       ).length
     },
+    prompt_diagnostics: promptDiagnostics,
     delivery: {
       manifest_path: manifestPath,
       review_brief_path: reviewBriefPath,
@@ -465,7 +629,12 @@ export async function buildEvalTracePacket(options: {
       artifacts: artifacts.length,
       recovery_cycles: interventionEvents.length,
       simulation_events: simulationEvents.length,
-      trajectory_events: trajectory.length
+      trajectory_events: trajectory.length,
+      prompt_diagnostics_count: promptDiagnostics.count,
+      prompt_diagnostics_warnings: promptDiagnostics.warnings.length,
+      prompt_diagnostics_total_chars: promptDiagnostics.total_chars,
+      prompt_diagnostics_max_chars: promptDiagnostics.max_prompt_chars,
+      recovery_learning_records: recoveryLearning.length
     }
   };
 }

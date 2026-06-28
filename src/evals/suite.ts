@@ -20,6 +20,7 @@ import type {
   EvalJudgePayload,
   EvalScenario,
   EvalScenarioEnvironment,
+  EvalScenarioMeasurement,
   EvalScenarioMetadata,
   EvalScenarioRealWorldMetadata,
   EvalSupervisorResumeScript,
@@ -834,6 +835,58 @@ function normalizeScenarioCriteria(value: unknown, path: string, diagnostics: Ev
   return Object.fromEntries(entries);
 }
 
+function normalizeScenarioMeasurement(
+  value: unknown,
+  path: string,
+  diagnostics: EvalDiagnostic[]
+): EvalScenarioMeasurement | undefined {
+  if (!isRecord(value)) {
+    diagnostics.push({ path, message: "Eval scenario requires measurement object." });
+    return undefined;
+  }
+
+  const claim = readString(value.claim);
+  const scenarioType = readString(value.scenario_type);
+  const metrics = readStringArray(value.metrics);
+  const expectedFailureModes = readStringArray(value.expected_failure_modes);
+  const tweakSignal = readString(value.tweak_signal);
+
+  if (!claim) {
+    diagnostics.push({ path: `${path}.claim`, message: "Eval scenario measurement requires non-empty claim." });
+  }
+
+  if (!scenarioType) {
+    diagnostics.push({ path: `${path}.scenario_type`, message: "Eval scenario measurement requires non-empty scenario_type." });
+  }
+
+  if (!Array.isArray(value.metrics) || metrics.length === 0) {
+    diagnostics.push({ path: `${path}.metrics`, message: "Eval scenario measurement requires at least one metric." });
+  }
+
+  if (!Array.isArray(value.expected_failure_modes) || expectedFailureModes.length === 0) {
+    diagnostics.push({
+      path: `${path}.expected_failure_modes`,
+      message: "Eval scenario measurement requires at least one expected_failure_mode."
+    });
+  }
+
+  if (!tweakSignal) {
+    diagnostics.push({ path: `${path}.tweak_signal`, message: "Eval scenario measurement requires non-empty tweak_signal." });
+  }
+
+  if (!claim || !scenarioType || metrics.length === 0 || expectedFailureModes.length === 0 || !tweakSignal) {
+    return undefined;
+  }
+
+  return {
+    claim,
+    scenario_type: scenarioType,
+    metrics,
+    expected_failure_modes: expectedFailureModes,
+    tweak_signal: tweakSignal
+  };
+}
+
 function normalizeScenario(
   value: unknown,
   scenarioPath: string,
@@ -847,7 +900,7 @@ function normalizeScenario(
   pushUnknownFieldDiagnostics(
     value,
     `scenario:${scenarioPath}`,
-    ["id", "bucket", "difficulty", "description", "workflow", "environment", "criteria", "metadata"],
+    ["id", "bucket", "difficulty", "description", "measurement", "workflow", "environment", "criteria", "metadata"],
     diagnostics
   );
 
@@ -865,6 +918,11 @@ function normalizeScenario(
   const harness = workflowRecord ? readString(workflowRecord.harness) : undefined;
   const workspaceBackend = workflowRecord?.workspace_backend === "worktree" ? "worktree" : "inplace";
   const launchProfile = workflowRecord ? readString(workflowRecord.launch_profile) : undefined;
+  const measurement = normalizeScenarioMeasurement(
+    value.measurement,
+    `scenario:${scenarioPath}.measurement`,
+    diagnostics
+  );
   const criteria = normalizeScenarioCriteria(value.criteria, `scenario:${scenarioPath}.criteria`, diagnostics);
   const metadata = normalizeScenarioMetadata(value.metadata, scenarioDir, `scenario:${scenarioPath}.metadata`, diagnostics);
 
@@ -963,6 +1021,13 @@ function normalizeScenario(
     bucket,
     difficulty,
     description,
+    measurement: measurement ?? {
+      claim: description,
+      scenario_type: "invalid",
+      metrics: ["invalid measurement contract"],
+      expected_failure_modes: ["missing or invalid measurement contract"],
+      tweak_signal: "Fix the scenario measurement contract before interpreting this eval."
+    },
     scenario_dir: scenarioDir,
     graph_template_path: graphTemplatePath,
     environment,

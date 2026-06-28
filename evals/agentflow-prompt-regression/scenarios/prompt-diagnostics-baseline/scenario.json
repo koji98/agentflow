@@ -1,0 +1,77 @@
+{
+  "id": "prompt-diagnostics-baseline",
+  "bucket": "prompt-context-diagnostics",
+  "difficulty": "medium",
+  "description": "Prompt diagnostics should be present for normal worker prompts without leaking into the task.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Prompt diagnostics should be present for normal worker prompts without leaking into the task.",
+    "scenario_type": "regression:prompt-context-diagnostics",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "delivery auditability",
+      "prompt/context regression"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "delivery package is missing, unsupported, or not review-ready",
+      "prompt, context, orientation, or runtime trajectory regressed"
+    ],
+    "tweak_signal": "Inspect prompt diagnostics, context priority, glob/index packaging, read-first behavior, and prompt noise before changing task logic."
+  },
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "Scenario:",
+            "Validation:"
+          ]
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
+    "prompt-regression": {
+      "task": "Write the baseline handoff. Do the normal task from the prompt; do not mention prompt diagnostics or human-debug files in the handoff.",
+      "required_contains": [
+        "Scenario:",
+        "Evidence:",
+        "Validation:"
+      ],
+      "forbidden_contains": [
+        "prompt-diagnostics",
+        "human-debug"
+      ],
+      "required_af": [
+        "orient",
+        "complete check"
+      ],
+      "require_prompt_diagnostics": true,
+      "forbidden_prompt_warnings": [
+        "context_many_pointers",
+        "tool_many_entries",
+        "skill_many_entries",
+        "agentflow_meta_heavy",
+        "duplicated_operating_guidance",
+        "judge_goal_overfed",
+        "recovery_without_priority"
+      ]
+    }
+  }
+}

@@ -225,6 +225,17 @@ export interface ManagedRuntimeMetadata {
   config?: Record<string, unknown>;
 }
 
+export interface ManagedPromptSection {
+  title: string;
+  lines: string[];
+}
+
+export interface ManagedPromptContract {
+  phase: string;
+  task: string;
+  sections: ManagedPromptSection[];
+}
+
 export interface BaseNode {
   id: string;
   label?: string;
@@ -237,6 +248,7 @@ export interface BaseExecutableNode extends BaseNode {
   artifacts?: Record<string, ArtifactDefinition>;
   managed_artifact_forwards?: Record<string, ManagedArtifactForward>;
   managed_runtime?: ManagedRuntimeMetadata;
+  managed_prompt?: ManagedPromptContract;
 }
 
 export interface AgentNode extends BaseExecutableNode {

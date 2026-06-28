@@ -3,6 +3,23 @@
   "bucket": "artifact-completion",
   "difficulty": "medium",
   "description": "Agent must write current-attempt artifacts instead of reusing stale evidence.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Agent must write current-attempt artifacts instead of reusing stale evidence.",
+    "scenario_type": "regression:artifact-completion",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "delivery auditability",
+      "prompt/context regression"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "delivery package is missing, unsupported, or not review-ready",
+      "prompt, context, orientation, or runtime trajectory regressed"
+    ],
+    "tweak_signal": "Inspect prompt diagnostics, context priority, glob/index packaging, read-first behavior, and prompt noise before changing task logic."
+  },
   "workflow": {
     "graph_template": "../../templates/agent.graph.template.json",
     "harness": "codex-cli",
@@ -13,13 +30,33 @@
     "init_git": true
   },
   "criteria": {
-    "outcome": { "status": "passed" },
-    "artifact": { "required": [{ "name": "handoff", "contains": ["current-attempt"] }] },
-    "delivery": { "required": true },
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "current-attempt"
+          ]
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
     "prompt-regression": {
       "task": "Pretend a stale prior handoff exists elsewhere. The current declared artifact must say `current-attempt` and must not contain `STALE_PRIOR_ARTIFACT`.",
-      "required_contains": ["current-attempt", "Scenario:", "Evidence:", "Completion:"],
-      "forbidden_contains": ["STALE_PRIOR_ARTIFACT"]
+      "required_contains": [
+        "current-attempt",
+        "Scenario:",
+        "Evidence:",
+        "Completion:"
+      ],
+      "forbidden_contains": [
+        "STALE_PRIOR_ARTIFACT"
+      ]
     }
   }
 }

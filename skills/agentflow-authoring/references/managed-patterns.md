@@ -1,6 +1,6 @@
 # Managed Patterns
 
-Use managed patterns when the lifecycle is standard and the operator wants inspectable lowered nodes with stable declared artifacts. The prompts should still read like native-quality worker briefs: task contract first, phase or item focus second, and Agentflow mechanics behind runtime state, `af orient`, and verification.
+Use managed patterns when the lifecycle is standard and the pattern fit improves the final product outcome. The prompts should still read like native-quality worker briefs: task contract first, phase or item focus second, and Agentflow mechanics behind runtime state, `af orient`, and verification.
 
 ## `pattern_deep_research`
 
@@ -24,7 +24,7 @@ Deep-research helpers should be authored as evidence gatherers, not implementati
 
 ## `pattern_deep_work`
 
-Use when the task is "work, validate, critique, and fix until done."
+Use when the task is "work, validate, critique, and fix until done" for one coherent work product.
 
 Good for:
 
@@ -40,11 +40,11 @@ Use `phases.plan`, `phases.execute`, `phases.verify`, and `phases.publish` only 
 
 ## `pattern_work_list`
 
-Use when the task is "discover the finite list, freeze it, then work the list to a stable handoff."
+Use when the task is "discover the finite list, freeze it, then work the list to a stable handoff" and the item boundaries have independent product value.
 
 Good for:
 
-- reviewable implementation slices when the exact slice count is unknown upfront
+- reviewable implementation slices only when each slice can be completed, judged, and reused independently
 - migration batches
 - documentation passes
 - audit findings
@@ -52,7 +52,7 @@ Good for:
 
 Author `what_counts_as_one_item` and `done_when` in domain terms. If items are PR branches, say branch/base/PR readiness; if migrations, say batch boundary, rollback, and validation; if docs, say reader outcome and review evidence. Do not hard-code the item count when discovery owns it.
 
-The planner writes only `work-list.json`; runtime validates sequential `w1`, `w2`, `w3` ids and freezes the list before execution. Runtime then launches one managed item execution per frozen item. Agents do not check off items manually. Runtime records item status in the ledger and publishes stable artifacts: `summary` and `work_items`.
+The planner writes only `work-list.json`; runtime validates sequential `w1`, `w2`, `w3` ids and freezes the list before execution. Runtime then launches one managed item execution per frozen item. Agents do not check off items manually. Runtime records item status in the ledger and publishes the stable `work_items` artifact.
 
 Use `item_worker.kind: "agent"` for one-pass item execution. Use `item_worker.kind: "deep_work"` when each item needs plan/execute/verify/publish phases, criteria, scorecard feedback, item-level semantic verification, and bounded retries before publishing. Deep-work item workers may set optional `item_worker.phases.plan/execute/verify/publish` with the same additive semantics as top-level `pattern_deep_work.phases`: phase intent appends to the parent/item contract, phase support merges only for that phase, and phase model/reasoning/sandbox/profile applies only to that phase. Work-list rubric criteria can target `workspace`, `item_handoff`, or `work_list_ledger`.
 
@@ -61,6 +61,7 @@ Downstream nodes should reference stable artifacts such as `my_work_list.work_it
 ## Avoid
 
 - Using managed patterns to hide vague requirements.
+- Using `pattern_work_list` for a coherent implementation task where item splitting makes local compliance easier but final completion less likely.
 - Depending on generated internal ids.
 - Adding deterministic command criteria for speculative scripts.
 - Using deep research where the implementation agent can cheaply discover local context inside its node boundary.

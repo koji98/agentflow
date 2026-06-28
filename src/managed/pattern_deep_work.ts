@@ -6,6 +6,7 @@ import type {
   BaseExecutableNode,
   CheckNode,
   ContextItem,
+  ExecNode,
   NodeSupport,
   ParallelNode,
   RepeatNode,
@@ -15,6 +16,7 @@ import type { ReasoningEffort, SandboxMode } from "../graph/schema.js";
 import {
   artifactContext,
   body,
+  managedPromptContract,
   managedId,
   maxConcurrency,
   mergeArtifacts,
@@ -106,17 +108,16 @@ function formatList(title: string, values: string[] | undefined, fallback: strin
     : [`${title}: ${fallback}`];
 }
 
-function formatPublicArtifacts(artifacts: Record<string, ArtifactDefinition>): string[] {
-  return Object.entries(artifacts).flatMap(([name, artifact]) => [
-    `- ${name}: publish this declared artifact; the Declared Artifacts table shows the exact command.`,
-    `  ${artifact.description}`
+function formatDraftArtifacts(artifacts: Record<string, ArtifactDefinition>): string[] {
+  return Object.keys(artifacts).flatMap((name) => [
+    `- ${draftArtifactName(name)}: Use \`af artifact write ${draftArtifactName(name)}\` to publish the draft for final artifact ${name}.`
   ]);
 }
 
-function formatDraftArtifacts(artifacts: Record<string, ArtifactDefinition>): string[] {
-  return Object.keys(artifacts).flatMap((name) => [
-    `- ${draftArtifactName(name)}: publish this declared artifact as the draft for final artifact \`${name}\`.`
-  ]);
+function userAuthoredDraftArtifacts(artifacts: Record<string, ArtifactDefinition> | undefined): Record<string, ArtifactDefinition> {
+  return Object.fromEntries(
+    Object.entries(artifacts ?? {}).filter(([name]) => name !== "packet")
+  );
 }
 
 function formatCriteria(criteria: PatternDeepWorkCompletionCriterion[]): string[] {
@@ -227,9 +228,9 @@ function formatPhaseContract(config: PatternDeepWorkConfig, phase: PatternDeepWo
 function buildPlanPrompt(
   config: PatternDeepWorkConfig,
   cycleCount: number
-): string {
-  return renderPrompt([
-    body("You are an implementation planner preparing the next focused work cycle. Do not edit files in this phase. Understand the task, feedback, and repository state well enough to give the execution agent the smallest credible plan."),
+){
+  return managedPromptContract("plan", "Plan execution work needed to satisfy the full task from the current state.", [
+    body("You are planning execution work to satisfy the full task from the current state. Do not edit files in this phase. Preserve the task intent, inspect the available evidence, and give the execution agent a plan that aims to complete the task now when feasible."),
     section("Task Contract", [
       `Goal: ${config.intent.goal}`,
       ...formatList("Acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
@@ -247,30 +248,47 @@ function buildPlanPrompt(
       "If prior scorecards, work notes, criterion records, or repeat history are omitted because no prior cycle exists, treat that as expected first-cycle state.",
       "Do not wait for, search globally for, or report a blocker solely because first-cycle prior materials are missing.",
       "Identify the concrete gap between the current state and the task contract.",
-      "Define the smallest credible next plan that can satisfy failed criteria without widening scope.",
+      "Use prior feedback, scorecards, and failed criteria as gap evidence; do not shrink the task to only the last failed check.",
+      "Plan the work needed to satisfy the full task from the current state.",
+      "Aim for completion in this execution. If full completion is not feasible now, plan the most complete useful slice and state the remaining gap explicitly.",
       "Map every completion criterion to the evidence the execution phase should produce or inspect.",
-      "Name the expected material delta for this cycle so retries can distinguish real progress from repeated spin.",
+      "Name the expected material change or evidence that should prove progress toward completion.",
       "Name likely files or areas to inspect or change, but do not over-prescribe exact code unless the evidence requires it.",
       "Recommend focused validation commands or checks the execution agent should run.",
+      "Say the executor may adapt the plan when workspace evidence proves an assumption wrong, as long as the adaptation serves the full task contract.",
       "Do not edit repository or workspace files in this planning phase. Only write the planning artifact requested below."
     ]),
     section("Output Contract", [
-      "Publish the `cycle_plan` artifact.",
-      "Include sections: `Objective`, `Relevant evidence`, `Planned material delta`, `Criterion evidence map`, `Validation plan`, and `Risks or constraints`.",
+      "Publish only the declared `plan` artifact.",
+      "Use `af artifact write plan` to publish the plan content.",
+      "Do not create or edit workspace files during this planning phase.",
+      "Include sections: `Task target`, `Current state`, `Gap`, `Execution plan`, `Validation plan`, `Expected material change`, `Remaining gap`, and `Risks or constraints`.",
       "Preserve exact task-specific names, labels, commands, and required phrases from the task contract in the plan.",
-      "The `cycle_plan` artifact is the durable planning record; do not create a milestone solely to restate the plan. If you do create a milestone, complete it before running `af complete check`."
+      "Do not create a milestone solely to restate the plan. If you do create a milestone, complete it before running `af complete check`."
     ])
   ]);
 }
 
 function buildGenerateValidatePrompt(
   config: PatternDeepWorkConfig,
-  publicArtifacts: Record<string, ArtifactDefinition>
-): string {
-  return renderPrompt([
-    body("You are an implementation agent responsible for completing and validating this work cycle. Do not stop at a plausible change. Work until you have verified the candidate satisfies the goal, acceptance criteria, and constraints, or until you have concrete evidence of what remains."),
+  draftableArtifacts: Record<string, ArtifactDefinition>
+){
+  const draftLines = Object.keys(draftableArtifacts).length > 0
+    ? [
+        "Also write draft versions of user-authored final artifacts so completion criteria can grade them before final publication.",
+        "Draft final artifacts should include enough evidence citations for an evaluator to see why the change, validation, and risk claims are supported.",
+        ...formatDraftArtifacts(draftableArtifacts)
+      ]
+    : [
+        "No user-authored final artifacts are declared for this node.",
+        "Do not create `draft-summary.md`, `draft-packet.json`, or extra final artifacts.",
+        "The runtime writes the final `packet` artifact after the completion gate passes."
+      ];
+
+  return managedPromptContract("execute", "Do and validate the work needed to satisfy the full task from the current state.", [
+    body("You are responsible for satisfying the full task from the current state. Do not stop at a plausible change. Work until you have verified the candidate satisfies the goal, acceptance criteria, and constraints, or until you have concrete evidence of what remains."),
     section("Task Contract", [
-      "If completion criteria do not pass, a later cycle may use your notes and feedback to continue. Write concrete validation evidence and residual risks so the next cycle can improve rather than restart.",
+      "Aim to complete the task in this execution. Retries are a fallback; write concrete validation evidence and residual risks only after doing the work.",
       `Goal: ${config.intent.goal}`,
       ...formatList("Acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
       ...formatList("Constraints", config.intent.constraints, "Stay inside the authored task contract.")
@@ -281,25 +299,24 @@ function buildGenerateValidatePrompt(
     ]),
     ...formatPhaseContract(config, "execute"),
     section("Execution Task", [
-      "Follow the cycle plan in context.",
+      "Use `plan.md` as guidance, not as a limit.",
+      "The task contract controls when `plan.md` is incomplete, stale, too small, or contradicted by repository evidence.",
       "Satisfy the task contract, not only the visible tests; handle edge cases directly implied by the goal, acceptance criteria, and local code.",
       "Keep edits scoped; add/edit tests only when the task asks or repo contract expects them.",
-      "Preserve API semantics with nullish or explicit checks; avoid truthiness and absence-check ceremony unless null and absence must differ; prefer direct formulas over expanded arithmetic; use helpers/constants only when they clarify; round money with integer cents or Number.EPSILON; make rejection errors name expected formats or valid values.",
-      "If evidence shows the plan is wrong, make the smallest justified deviation and record why in work notes.",
+      "If evidence shows the plan is wrong, make the task-justified adjustment needed to satisfy the full task and record why in work notes.",
       "Inspect enough repository context to follow local patterns before editing.",
       "When draft artifacts rely on upstream research, plans, tests, or prior context, cite concrete evidence names, paths, commands, or packet fields instead of using generic references like prior research.",
       "Use available repo, device, and plugin CLIs naturally when they help complete or validate the work.",
       "Run focused validation commands when feasible. If validation fails and the fix is clear, fix and rerun.",
       "If you cannot run a useful validation command, record exactly why and what evidence you used instead.",
-      "Do not ask for supervisor intervention for ordinary failing tests, low quality feedback, or incomplete work; those are normal loop feedback.",
-      "Do rely on runtime supervisor recovery for broken context, missing tools, malformed evaluator output, harness failure, artifact materialization failure, or other runtime substrate issues."
+      "Fix ordinary task, validation, and quality failures yourself when the next action is clear.",
+      "Report precise blockers only for missing context, broken tools, malformed runtime outputs, artifact publishing failures, harness failures, or runtime failures."
     ]),
     section("Output Contract", [
-      "Publish the `work_notes` artifact with what changed, validation attempted, and remaining risks.",
-      "Include the plan followed, any justified deviations, exact validation evidence, and the current criterion evidence map.",
-      "Also write draft versions of every final artifact so completion criteria can grade them before final publication.",
-      "Draft handoffs and summaries should include enough evidence citations for an evaluator to see why the change, validation, and risk claims are supported.",
-      ...formatDraftArtifacts(publicArtifacts)
+      "Publish the `work_notes` artifact after doing the work.",
+      "Use `af artifact write work_notes` to publish the work notes.",
+      "Include what changed, why any deviations from `plan.md` were needed, exact validation evidence, remaining risks, and any remaining gap.",
+      ...draftLines
     ])
   ]);
 }
@@ -339,37 +356,6 @@ function buildRubricGoalWithPhase(
   const phaseLines = formatPhaseContract(config, "verify");
   const base = buildRubricGoal(criterion);
   return phaseLines.length === 0 ? base : `${base}\n\n${renderPrompt(phaseLines)}`;
-}
-
-function buildFinalPublishPrompt(
-  config: PatternDeepWorkConfig,
-  publicArtifacts: Record<string, ArtifactDefinition>
-): string {
-  return renderPrompt([
-    body("You are publishing the final artifacts from the latest passing work cycle. Make them complete, concrete, and evidence-backed."),
-    section("Task Contract", [
-      `Goal: ${config.intent.goal}`,
-      ...formatList("Acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
-      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored task contract.")
-    ]),
-    section("Current Context", [
-      "Use the latest passing completion scorecard, work notes, and draft artifact materials.",
-      "Do not claim success beyond the completion evidence."
-    ]),
-    ...formatPhaseContract(config, "publish"),
-    section("Required Summary Shape", [
-      "Preserve task-specific identifiers and phrases from the task goal when they are part of the requested final output.",
-      "When a final artifact description names literal labels or fields, include those labels in that artifact; do not replace them with nearby section names.",
-      "In the Markdown summary, include a clearly labeled scorecard evidence or completion scorecard section.",
-      "That section must cite the score, threshold, criterion results, validation command/result, and evidence paths available in context.",
-      "Keep claims bounded to the scorecard and validation evidence; do not claim broader success."
-    ]),
-    section("Declared Final Artifacts", [
-      "Publish the declared final artifacts.",
-      ...formatPublicArtifacts(publicArtifacts),
-      "The `packet` artifact must include completion score, criterion results, validation evidence, residual risks, and next actions."
-    ])
-  ]);
 }
 
 function buildGateScript(criteria: PatternDeepWorkCompletionCriterion[], passThreshold: number): string {
@@ -460,16 +446,48 @@ function readCriterion(record) {
   }
 }
 
-const results = criteria.map(readCriterion);
+function requiredCriterionGateBlocker(result) {
+  if (!result.required) return null;
+  if (!result.passed) {
+    return {
+      criterion_id: result.id,
+      summary: result.summary
+    };
+  }
+  if (result.score < passThreshold) {
+    return {
+      criterion_id: result.id,
+      summary: result.summary + " Required criterion score " + result.score.toFixed(2) + " is below the pass threshold " + passThreshold.toFixed(2) + "."
+    };
+  }
+  return null;
+}
+
+function normalizeCriterionForGate(result) {
+  const blocker = requiredCriterionGateBlocker(result);
+  if (!blocker) return result;
+  const issues = Array.isArray(result.issues) ? [...result.issues] : [];
+  if (result.passed === true) {
+    issues.push(blocker.summary);
+  }
+  return {
+    ...result,
+    evaluator_passed: result.passed,
+    passed: false,
+    summary: blocker.summary,
+    issues
+  };
+}
+
+const results = criteria.map(readCriterion).map(normalizeCriterionForGate);
 const blockers = results
-  .filter((result) => result.required && !result.passed)
-  .map((result) => ({
-    criterion_id: result.id,
-    summary: result.summary
-  }));
+  .flatMap((result) => {
+    const blocker = requiredCriterionGateBlocker(result);
+    return blocker ? [blocker] : [];
+  });
 const totalScore = results.reduce((sum, result) => sum + (result.weighted_score ?? result.score * result.weight), 0);
 const passed = blockers.length === 0 && totalScore >= passThreshold;
-const failedCriteria = results.filter((result) => !result.passed || result.score * result.weight < result.weight);
+const failedCriteria = results.filter((result) => !result.passed || result.score < passThreshold);
 const scorecard = {
   passed,
   total_score: Number(totalScore.toFixed(4)),
@@ -497,6 +515,96 @@ fs.writeFileSync(path.join(out, "verification.json"), JSON.stringify({
 `.trim();
 }
 
+function buildFinalizerScript(
+  packetArtifact: ArtifactDefinition,
+  artifacts: Record<string, ArtifactDefinition>
+): string {
+  const artifactRecords = Object.entries(artifacts).map(([name, definition]) => ({
+    name,
+    definition,
+    draft_name: draftArtifactName(name)
+  }));
+
+  return `
+const fs = require("node:fs");
+const path = require("node:path");
+const artifacts = ${JSON.stringify(artifactRecords)};
+const packetDefinition = ${JSON.stringify(packetArtifact)};
+const out = process.env.AGENTFLOW_OUTPUT_DIR;
+const workspace = process.env.AGENTFLOW_WORKSPACE;
+
+function fail(message) {
+  console.error(message);
+  process.exit(1);
+}
+
+function envKey(name) {
+  return "AGENTFLOW_CONTEXT_" + String(name).toUpperCase();
+}
+
+function readJsonOptional(filePath) {
+  if (!filePath) return undefined;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveWithin(root, relativePath, label) {
+  if (!root) fail("Missing root for " + label + ".");
+  const resolvedRoot = path.resolve(root);
+  const resolvedPath = path.resolve(resolvedRoot, relativePath);
+  if (resolvedPath !== resolvedRoot && !resolvedPath.startsWith(resolvedRoot + path.sep)) {
+    fail(label + " escapes its root: " + relativePath);
+  }
+  return resolvedPath;
+}
+
+function destinationFor(definition, label) {
+  return resolveWithin(definition.from === "workspace" ? workspace : out, definition.path, label);
+}
+
+if (!out) fail("Missing AGENTFLOW_OUTPUT_DIR.");
+
+const scorecardPath = process.env.AGENTFLOW_CONTEXT_COMPLETION_SCORECARD;
+const workNotesPath = process.env.AGENTFLOW_CONTEXT_WORK_NOTES;
+const scorecard = readJsonOptional(scorecardPath);
+const finalArtifacts = [];
+
+for (const artifact of artifacts) {
+  const source = process.env[envKey(artifact.draft_name)];
+  if (!source || !fs.existsSync(source)) {
+    fail("Missing accepted draft artifact for " + artifact.name + ".");
+  }
+  const destination = destinationFor(artifact.definition, "Final artifact " + artifact.name);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.copyFileSync(source, destination);
+  finalArtifacts.push({
+    name: artifact.name,
+    path: destination,
+    source_draft_path: source,
+    description: artifact.definition.description
+  });
+}
+
+const packetPath = destinationFor(packetDefinition, "Runtime packet artifact");
+const packet = {
+  schema_version: 1,
+  status: scorecard && scorecard.passed === true ? "completed" : "unknown",
+  generated_at: new Date().toISOString(),
+  completion_scorecard_path: scorecardPath ?? null,
+  work_notes_path: workNotesPath ?? null,
+  completion: scorecard ?? null,
+  final_artifacts: finalArtifacts
+};
+
+fs.mkdirSync(path.dirname(packetPath), { recursive: true });
+fs.writeFileSync(packetPath, JSON.stringify(packet, null, 2) + "\\n");
+console.log("Published runtime deep-work packet" + (finalArtifacts.length > 0 ? " and " + finalArtifacts.length + " user-authored artifact(s)." : "."));
+`.trim();
+}
+
 function buildDraftArtifacts(publicArtifacts: Record<string, ArtifactDefinition>): Record<string, ArtifactDefinition> {
   return Object.fromEntries(
     Object.entries(publicArtifacts).map(([name, artifact]) => [
@@ -512,7 +620,7 @@ function buildDraftArtifacts(publicArtifacts: Record<string, ArtifactDefinition>
 
 function buildCriterionContext(
   generateValidateId: string,
-  publicArtifacts: Record<string, ArtifactDefinition>,
+  draftableArtifacts: Record<string, ArtifactDefinition>,
   criterion: PatternDeepWorkCompletionCriterion
 ): ContextItem[] {
   const common: ContextItem[] = [
@@ -520,19 +628,23 @@ function buildCriterionContext(
   ];
 
   if (criterion.kind === "rubric" && criterion.target.startsWith("artifact:")) {
+    const artifactName = criterion.target.slice("artifact:".length);
+    if (!draftableArtifacts[artifactName]) {
+      return common;
+    }
     return [
       ...common,
       artifactContext(
-        draftArtifactName(criterion.target.slice("artifact:".length)),
+        draftArtifactName(artifactName),
         generateValidateId,
-        draftArtifactName(criterion.target.slice("artifact:".length))
+        draftArtifactName(artifactName)
       )
     ];
   }
 
   return [
     ...common,
-    ...Object.keys(publicArtifacts).map((name) =>
+    ...Object.keys(draftableArtifacts).map((name) =>
       artifactContext(draftArtifactName(name), generateValidateId, draftArtifactName(name))
     )
   ];
@@ -562,10 +674,19 @@ function buildCriterionNode(
       on_failure: "continue",
       support: mergeSupportContext(
         checkShared.support,
-        [artifactContext("work_notes", generateValidateId, "work_notes")]
+        buildCriterionContext(generateValidateId, publicArtifacts, criterion)
       ),
+      managed_runtime: {
+        kind: "pattern_deep_work",
+        root_id: config.id,
+        phase: "verify",
+        config: {
+          criterion_id: criterion.id,
+          criterion_kind: criterion.kind
+        }
+      },
       intent: {
-        goal: `Run deterministic completion criterion \`${criterion.id}\` for the current deep work cycle.`,
+        goal: `Run deterministic completion criterion \`${criterion.id}\` for the current deep work result.`,
         acceptance_criteria: [
           "The command result is captured as completion feedback for the deterministic gate."
         ],
@@ -581,6 +702,16 @@ function buildCriterionNode(
     ...sharedAiCheckBase(verifyConfig),
     check_kind: "ai",
     on_failure: "continue",
+    managed_runtime: {
+      kind: "pattern_deep_work",
+      root_id: config.id,
+      phase: "verify",
+      config: {
+        criterion_id: criterion.id,
+        criterion_kind: criterion.kind,
+        target: criterion.target
+      }
+    },
     support: mergeSupportContext(
       sharedAiCheckBase(verifyConfig).support,
       buildCriterionContext(generateValidateId, publicArtifacts, criterion)
@@ -618,7 +749,7 @@ function buildGateContext(config: PatternDeepWorkConfig): ContextItem[] {
 
 function buildPublishContext(
   config: PatternDeepWorkConfig,
-  publicArtifacts: Record<string, ArtifactDefinition>,
+  draftableArtifacts: Record<string, ArtifactDefinition>,
   generateValidateId: string,
   gateId: string
 ): ContextItem[] {
@@ -629,7 +760,7 @@ function buildPublishContext(
     artifactContext("work_notes", generateValidateId, "work_notes", {
       iteration: "latest_passed"
     }),
-    ...Object.keys(publicArtifacts).map((name) =>
+    ...Object.keys(draftableArtifacts).map((name) =>
       artifactContext(draftArtifactName(name), generateValidateId, draftArtifactName(name), {
         iteration: "latest_passed"
       })
@@ -690,15 +821,16 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
   const loopId = workflowNodeId(config.id, "work_loop");
   const loopBodyId = workflowNodeId(config.id, "work_loop_body");
   const publicArtifacts = mergeManagedPublicArtifacts(config.artifacts);
+  const draftableArtifacts = userAuthoredDraftArtifacts(config.artifacts);
   const planConfig = phaseConfig(config, "plan");
   const executeConfig = phaseConfig(config, "execute");
   const publishConfig = phaseConfig(config, "publish");
   const planShared = sharedAgentBase(planConfig);
   const executeShared = sharedAgentBase(executeConfig);
-  const publishShared = sharedAgentBase(publishConfig);
   const gateShared = sharedNonPromptNodeBase(config);
+  const publishPhaseIntent = config.phases?.publish?.intent;
   const criterionNodes = config.completion.criteria.map((criterion, index) =>
-    buildCriterionNode(config, generateValidateId, publicArtifacts, criterion, index)
+    buildCriterionNode(config, generateValidateId, draftableArtifacts, criterion, index)
   );
   const criteriaPanel: ParallelNode = {
     type: "parallel",
@@ -714,21 +846,22 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
     label: "Deep Work Plan",
     ...planShared,
     support: mergeSupportContext(planShared.support, buildPlanContext(config, generateValidateId, gateId)),
-    artifacts: outputDirArtifact("cycle_plan", "cycle-plan.md", "Focused plan for the next deep work cycle."),
+    artifacts: outputDirArtifact("plan", "plan.md", "Execution plan for satisfying the deep work task from the current state."),
     managed_runtime: {
       kind: "pattern_deep_work",
       root_id: config.id,
       phase: "plan"
     },
     intent: {
-      goal: buildPlanPrompt(planConfig, config.completion.max_cycles),
+      goal: "Plan the execution work needed to satisfy the full deep-work task from the current state. Do not edit files in this planning phase.",
       acceptance_criteria: [
         "The plan addresses the task contract and any prior failed completion criteria.",
         "The plan identifies focused validation the execution agent should run when feasible.",
         "The plan does not edit the workspace."
       ],
       constraints: planConfig.intent.constraints
-    }
+    },
+    managed_prompt: buildPlanPrompt(planConfig, config.completion.max_cycles)
   };
 
   const generateValidateNode: AgentNode = {
@@ -737,25 +870,28 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
     label: "Generate And Validate",
     ...executeShared,
     support: mergeSupportContext(executeShared.support, [
-      artifactContext("cycle_plan", planId, "cycle_plan"),
+      artifactContext("plan", planId, "plan"),
       artifactContext("failed_completion_scorecard", gateId, "completion_scorecard", {
         iteration: "latest_failed",
         if_available: true
       })
     ]),
     artifacts: mergeArtifacts(
-      outputDirArtifact("work_notes", "work-notes.md", "Notes from the current deep work cycle."),
-      buildDraftArtifacts(publicArtifacts)
+      outputDirArtifact("work_notes", "work-notes.md", "Notes and validation evidence from the current deep work result."),
+      buildDraftArtifacts(draftableArtifacts)
     ),
     intent: {
-      goal: buildGenerateValidatePrompt(executeConfig, publicArtifacts),
+      goal: "Satisfy the full deep-work task from the current state, using plan.md as guidance and validating the result with concrete evidence.",
       acceptance_criteria: [
-        "The cycle implements the plan or records why the plan had to change.",
+        "The work satisfies the task contract or records a precise remaining gap.",
         "Focused validation is run when feasible, with exact results recorded in work notes and draft artifacts.",
-        "Draft final artifacts exist so completion criteria can grade the result."
+        Object.keys(draftableArtifacts).length > 0
+          ? "Draft user-authored final artifacts exist so completion criteria can grade the result."
+          : "The work records enough notes and validation evidence for criteria to grade the result."
       ],
       constraints: executeConfig.intent.constraints
-    }
+    },
+    managed_prompt: buildGenerateValidatePrompt(executeConfig, draftableArtifacts)
   };
 
   const gateNode: CheckNode = {
@@ -783,7 +919,7 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
     artifacts: outputDirArtifact(
       "completion_scorecard",
       "scorecard.json",
-      "Weighted completion scorecard for the latest deep work cycle."
+      "Weighted completion scorecard for the latest deep work result."
     )
   };
 
@@ -815,20 +951,29 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
     steps: [
       loop,
       {
-        type: "agent",
+        type: "exec",
         id: config.id,
-        ...(config.label ? { label: config.label } : { label: "Publish Deep Work" }),
-        ...publishShared,
-        support: mergeSupportContext(publishShared.support, buildPublishContext(config, publicArtifacts, generateValidateId, gateId)),
+        ...(config.label ? { label: config.label } : { label: "Finalize Deep Work" }),
+        ...sharedNonPromptNodeBase(publishConfig),
+        support: mergeSupportContext(sharedNonPromptNodeBase(publishConfig).support, buildPublishContext(config, draftableArtifacts, generateValidateId, gateId)),
+        command: "node",
+        args: ["-e", buildFinalizerScript(publicArtifacts.packet!, draftableArtifacts)],
         artifacts: publicArtifacts,
         intent: {
-          goal: buildFinalPublishPrompt(publishConfig, publicArtifacts),
+          goal: [
+            "Finalize the latest passing deep-work result into graph-addressable artifacts without new implementation or unsupported claims.",
+            ...(publishPhaseIntent?.goal ? [`Additional finalization objective: ${publishPhaseIntent.goal}`] : [])
+          ].join("\n"),
           acceptance_criteria: [
             ...publishConfig.intent.acceptance_criteria,
-            "The final artifacts are consistent with the latest passing completion scorecard and do not claim unsupported success.",
-            "The packet preserves completion score, criterion results, validation evidence, residual risks, and next actions."
+            ...(publishPhaseIntent?.acceptance_criteria ?? []),
+            "The runtime-owned packet records the latest passing completion scorecard, work notes, and promoted artifact references.",
+            "User-authored final artifacts are copied from accepted drafts without LLM rewriting."
           ],
-          constraints: publishConfig.intent.constraints
+          constraints: [
+            ...publishConfig.intent.constraints,
+            ...(publishPhaseIntent?.constraints ?? [])
+          ]
         }
       }
     ]

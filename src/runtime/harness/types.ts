@@ -1,7 +1,7 @@
 import { accessSync, constants } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join } from "node:path";
 
-import type { ArtifactDefinition } from "../../graph/authored.js";
+import type { ArtifactDefinition, ManagedPromptContract } from "../../graph/authored.js";
 import type { CliHint } from "../../graph/authored.js";
 import type { ResolvedSkill, ResolvedTool } from "../../graph/compiled.js";
 import type { HarnessCapabilities } from "../../graph/harness_capabilities.js";
@@ -13,6 +13,7 @@ import type {
 } from "../../supervisor/types.js";
 
 export type HarnessKind = "codex-cli" | "cursor-cli";
+export type AiEvaluatorSurface = "ai_check" | "managed_criterion" | "eval_quality_judge";
 
 export interface ArtifactRepairPromptContext {
   repairAttempt: number;
@@ -48,8 +49,11 @@ export interface AgentInvocation {
   nodeGoal?: string;
   nodeAcceptanceCriteria?: string[];
   nodeConstraints?: string[];
+  managedPrompt?: ManagedPromptContract;
   rubric?: string;
   aiCheckOutputSchema?: string;
+  aiEvaluatorSurface?: AiEvaluatorSurface;
+  aiCheckQualityThreshold?: number;
   contextPacketPath: string;
   contextManifestPath: string;
   contextManifest: string;
@@ -323,6 +327,14 @@ function formatRuntimeCliContract(): string[] {
   ];
 }
 
+function markdownCell(value: string | undefined): string {
+  return (value ?? "").replace(/\r?\n/gu, " ").replace(/\|/gu, "\\|").trim();
+}
+
+function artifactWriteCommand(name: string): string {
+  return `af artifact write ${name}`;
+}
+
 function describeSandbox(sandbox: AgentInvocation["sandbox"]): string {
   switch (sandbox) {
     case "read-only":
@@ -360,12 +372,12 @@ function formatArtifactContract(
 
   return [
     "## Declared Artifacts",
-    "Declared names/descriptions are binding. Write stdin with `af artifact write <name>` or existing files/binaries with `af artifact write <name> --file <path>`.",
+    "Names/descriptions are binding. Use each table command; append `--file <path>` for existing files/binaries.",
     "",
-    "| Name | Type | Description |",
-    "| --- | --- | --- |",
+    "| Name | Write Command | Type | Description |",
+    "| --- | --- | --- | --- |",
     ...entries.map(([name, artifact]) =>
-      `| \`${name}\` | ${artifact.content_type ? `\`${artifact.content_type}\`` : "auto-detect"} | ${artifact.description} |`
+      `| \`${name}\` | \`${artifactWriteCommand(name)}\` | ${artifact.content_type ? `\`${markdownCell(artifact.content_type)}\`` : "auto-detect"} | ${markdownCell(artifact.description)} |`
     )
   ];
 }
@@ -425,6 +437,26 @@ function formatGraphContext(invocation: AgentInvocation): string[] {
   ];
 }
 
+function formatManagedPromptContract(invocation: AgentInvocation): string[] {
+  const prompt = invocation.managedPrompt;
+  if (!prompt) {
+    return [];
+  }
+
+  const sections = prompt.sections.flatMap((section) => [
+    "",
+    `### ${section.title}`,
+    ...section.lines
+  ]);
+
+  return [
+    "## Phase Brief",
+    `- Phase: ${prompt.phase}`,
+    `- Task: ${prompt.task}`,
+    ...sections
+  ];
+}
+
 function formatSupervisorRecoveryEnvelope(invocation: AgentInvocation): string[] {
   const envelope = invocation.supervisorRecoveryEnvelope;
 
@@ -471,7 +503,7 @@ function formatOperatingBrief(invocation: AgentInvocation): string[] {
     "- Preserve API semantics with nullish or explicit checks; avoid truthiness and absence-check ceremony unless null and absence must differ; prefer direct formulas over expanded arithmetic; use helpers/constants only when they clarify; round money with integer cents or Number.EPSILON; make rejection errors name expected formats or valid values.",
     '- Log substantial plans, findings, decisions, and validation with `af milestone add`/`af milestone log`; quote command evidence as one `--command "..."` value; use existing milestones for late evidence.',
     "- Publish declared artifacts with `af artifact write <name>` or `af artifact write <name> --file <path>`.",
-    "- Use `af --help` when needed. Attempt exact commands named by the task before fallbacks.",
+    "- Use `af --help` when needed; prefer exact task commands before fallbacks.",
     "- Before final response, run `af complete check`; if incomplete, repair and rerun it until ready or truly blocked. When ready, stop and respond. Do not paste raw/stale check JSON into deliverables.",
     "- If the same tactic fails twice with the same symptom, change strategy. Stop early only for a concrete blocker and block the active milestone with evidence."
   ];
@@ -563,6 +595,39 @@ function formatNodeTask(
   return lines;
 }
 
+function formatAiEvaluatorTarget(invocation: AgentInvocation): string[] {
+  switch (invocation.aiEvaluatorSurface ?? "ai_check") {
+    case "managed_criterion":
+      return [
+        "## Evaluation Target",
+        "- What is being judged: one managed completion criterion.",
+        "- Target: the criterion target described in the Check Task and Rubric, not the whole managed lifecycle.",
+        "- Allowed evidence: the provided context pointers, work notes, draft artifacts, validation evidence, and workspace evidence refs when present.",
+        "- Out of scope: new implementation work, unrelated downstream graph work, broad lifecycle grading, or claims unsupported by the provided evidence.",
+        "- Result controls: managed scorecard aggregation and retry feedback for this criterion."
+      ];
+    case "eval_quality_judge":
+      return [
+        "## Evaluation Target",
+        "- What is being judged: one eval quality criterion for one completed trial trace packet.",
+        "- Target: the scenario, variant, trial, trace packet, and declared eval evidence named in the Check Task and context.",
+        "- Allowed evidence: the judge packet, trace packet, run-root artifacts, prompt diagnostics, and local trial files referenced by context.",
+        "- Out of scope: rerunning the workflow, doing the task yourself, de-anonymizing variants, or letting quality scores excuse deterministic blockers.",
+        "- Result controls: eval scorecard quality grading only; it does not change the completed run outcome.",
+        `- Quality threshold: ${invocation.aiCheckQualityThreshold ?? 4}`
+      ];
+    case "ai_check":
+      return [
+        "## Evaluation Target",
+        "- What is being judged: this authored read-only AI check node.",
+        "- Target: the Check Task and Rubric below.",
+        "- Allowed evidence: graph context when relevant, the context pointers in this prompt, and workspace files needed for the check.",
+        "- Out of scope: modifying the workspace, redoing upstream work, or grading unrelated graph tasks.",
+        "- Result controls: this check node's pass/fail result."
+      ];
+  }
+}
+
 export function renderHarnessPrompt(invocation: AgentInvocation): string {
   const graphContext = formatGraphContext(invocation);
   const toolContract = formatToolContract(invocation.tools);
@@ -647,6 +712,8 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
       "You are an AI evaluator executing one read-only check node in a wider Agentflow graph.",
       "Evaluate the check task below. Never modify the workspace. Your only output is structured JSON describing your judgment.",
       "",
+      ...formatAiEvaluatorTarget(invocation),
+      "",
       ...checkTask,
       "",
       ...graphContext,
@@ -695,6 +762,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
         `- \`${artifact.name}\``,
         `  - from: \`${artifact.from}\``,
         `  - declared path: \`${artifact.path}\``,
+        `  - write command: \`${artifactWriteCommand(artifact.name)}\``,
         `  - expected content: ${artifact.description}`
       ]),
       "",
@@ -726,7 +794,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
             "- Do not attempt artifact writes, source edits, or mutating shell commands."
           ]
         : [
-            "- Run `af orient`, create a repair milestone, inspect only evidence needed to repair the missing artifact, publish each missing artifact with `af artifact write <name>`, complete the milestone with evidence, then run `af complete check`.",
+            "- Run `af orient`, create a repair milestone, inspect only evidence needed to repair the missing artifact, publish each missing artifact with the exact command listed above, complete the milestone with evidence, then run `af complete check`.",
             "- If artifact content exists in prior evidence, use it only after checking it still satisfies the current artifact description.",
             "- Finish only after every missing artifact exists and `af complete check` reports ready."
           ])
@@ -735,6 +803,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
 
   const hasSupervisorRecoveryEnvelope = Boolean(invocation.supervisorRecoveryEnvelope);
   const supervisorRecoveryEnvelope = formatSupervisorRecoveryEnvelope(invocation);
+  const managedPrompt = formatManagedPromptContract(invocation);
   const nodeTask = formatNodeTask(invocation, {
     title: hasSupervisorRecoveryEnvelope ? "Success Contract (Original Authored Node Task)" : "Success Contract",
     emptyGoal: "Complete the authored node intent goal.",
@@ -752,6 +821,8 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     "",
     ...nodeTask,
     "",
+    ...managedPrompt,
+    ...(managedPrompt.length > 0 ? [""] : []),
     ...supervisorRecoveryEnvelope,
     ...(supervisorRecoveryEnvelope.length > 0 ? [""] : []),
     ...formatWorkspaceContract(invocation),

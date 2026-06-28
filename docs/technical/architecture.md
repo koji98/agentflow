@@ -235,7 +235,7 @@ Checks are sensors. They produce evidence for the run, not hidden control-plane 
 
 `check_kind: "deterministic"` runs a local command and can use `pass_if` with an exit code or JSON path.
 
-`check_kind: "ai"` invokes the configured harness and normalizes semantic evaluation JSON into a structured record.
+`check_kind: "ai"` invokes the configured harness and normalizes semantic evaluation JSON into a structured record. The shared transport carries an evaluator surface so authored AI checks, managed criteria, and eval quality judges keep separate target packets and schemas instead of sharing one broad judge contract.
 
 `on_failure: "continue"` keeps soft verification evidence visible while allowing control flow to continue. Operational failures such as spawn errors, timeouts, cancellation, invalid context, missing env files, and missing required artifacts remain hard failures.
 
@@ -245,7 +245,7 @@ Evaluation has five lanes:
 - Outcome verification is runtime enforcement for passing `agent` attempts. It runs after declared artifacts materialize, writes `runtime/verifier.json` and `human-debug/verifier/verdict.md`, and can turn a claimed pass into an `outcome_verification` failure routed through supervision.
 - Supervisor `semantic_evaluation` is an intervention. It is chosen by the supervisor after a failed AI check or semantic uncertainty, spends intervention budget, and writes supervisor evidence.
 - Managed pattern evaluation is authored workflow structure. `pattern_deep_work.completion` expands into command criteria, targeted rubric criteria, a deterministic scorecard gate, and a bounded repair loop as part of the compiled graph. `pattern_work_list` deterministically freezes a planned item list, runs one managed item execution per frozen item, verifies item outcomes, and publishes stable graph-addressable artifacts.
-- `agentflow eval` is offline workflow evaluation. It runs file-backed suites of scenarios, variants, and repeated trials against Agentflow workflows, grades hard facts with required criteria, rates qualitative behavior with quality criteria, and writes eval artifacts under `.agentflow/evals`; it does not replace in-run checks. Its design follows Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) and adopts ADK-style criteria, trajectory evaluation, and deterministic environment simulation.
+- `agentflow eval` is offline workflow evaluation. It runs file-backed suites of scenarios, variants, and repeated trials against Agentflow workflows, grades hard facts with required criteria, rates qualitative behavior with quality criteria, and writes eval artifacts under `.agentflow/evals`; it does not replace in-run checks. Quality judges receive trace-focused packets and cannot override deterministic hard blockers. Its design follows Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) and adopts ADK-style criteria, trajectory evaluation, and deterministic environment simulation.
 
 ## Offline Eval System
 
@@ -254,14 +254,14 @@ Evaluation has five lanes:
 - `types.ts`: v1 suite, scenario, variant, criteria, environment, trace packet, scorecard, and benchmark contracts.
 - `suite.ts`: suite loading, path-specific validation diagnostics, graph-template rendering, and strict judge JSON parsing.
 - `runner.ts`: trial environment setup, local docs/tool fixture wiring, deterministic simulation proxy wiring, normal `agentflow run` execution, trace packet writing, criteria evaluation, scorecard aggregation, reports, inspect, and compare.
-- `trace.ts`: normalized packet extraction from run roots.
+- `trace.ts`: normalized packet extraction from run roots, including trajectory, supervisor recovery-learning evidence, prompt/context diagnostics summaries, delivery state, and compact metrics.
 - `graders.ts`: custom script criterion execution and quality criterion invocation through the same Codex/Cursor-compatible harness interface as AI checks.
 
 Eval runner inputs are local files. A trial copies the scenario repo environment, optionally initializes git, optionally starts a local docs environment, optionally places copied tool fixtures on `PATH`, optionally creates deterministic simulation proxy tools, renders a graph template with scenario/variant/environment placeholders, and runs the rendered graph through the normal runtime. When a run root exists, grading proceeds even if the graph failed or paused so expected failure and expected pause cases can be scored.
 
 Eval artifacts are rooted at `<eval-root>` and include `eval-run.json`, `evaluation-ledger.json`, `suite-snapshot.json`, `benchmark.json`, `report.md`, and per-trial directories containing `rendered-graph.json`, `trial.json`, `trace.jsonl`, `trace-packet.json`, `criteria-results.json`, `criteria/`, `judge-results/`, `scorecard.json`, and `summary.md`.
 
-Required deterministic criteria are authoritative for hard facts: final graph status, required artifacts, forbidden edits, delivery evidence, expected trajectory, and expected supervisor classifications/gatherers/actions. Quality criteria are for qualitative dimensions such as artifact quality, evidence use, context handling, supervisor recovery quality, tool discipline, noise efficiency, and delivery auditability. Variant ids are anonymized in quality packets.
+Required deterministic criteria are authoritative for hard facts: final graph status, required artifacts, forbidden edits, delivery evidence, expected trajectory, expected supervisor classifications/gatherers/actions, forbidden supervisor actions, and recovery-learning diagnoses. Quality criteria are for qualitative dimensions such as artifact quality, evidence use, context handling, supervisor recovery quality, tool discipline, noise efficiency, and delivery auditability. Variant ids are anonymized in quality packets. A quality criterion fails closed when the trace outcome is non-passing, even if the LLM returns a high score.
 
 See `../product/evals.md` for authoring guidance, CLI usage, artifact layout, and the built-in dogfood suites.
 

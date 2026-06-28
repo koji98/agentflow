@@ -75,6 +75,7 @@ function fingerprintCompiledNode(node: CompiledExecutableNode): string {
     cli: node.cli,
     declared_artifacts: node.declared_artifacts,
     ...(node.managed_runtime ? { managed_runtime: node.managed_runtime } : {}),
+    ...(node.managed_prompt ? { managed_prompt: node.managed_prompt } : {}),
     ...(node.lowered_from ? { lowered_from: node.lowered_from } : {})
   };
 
