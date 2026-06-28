@@ -1,5 +1,9 @@
 {
   "id": "current",
   "description": "Current primitive Agentflow worker prompt and harness behavior.",
-  "graph_template": "templates/primitive-agent.graph.template.json"
+  "graph_template": "templates/primitive-agent.graph.template.json",
+  "env": {
+    "AGENTFLOW_CODEX_MODEL": "gpt-5.5",
+    "AGENTFLOW_CODEX_REASONING_EFFORT": "high"
+  }
 }

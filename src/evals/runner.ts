@@ -940,6 +940,7 @@ async function evaluateCriteria(options: {
         suite_dir: options.loaded.suite_dir,
         scenario: options.scenario,
         variant_id: options.variant.id,
+        variant_env: options.variant.env,
         trial_id: options.trial_id,
         run_root: options.run_root,
         trace_file: options.trace_file,

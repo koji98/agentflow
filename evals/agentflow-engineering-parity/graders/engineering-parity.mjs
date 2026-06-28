@@ -228,9 +228,66 @@ export function buildDirectCodexPrompt(taskText) {
   ].join("\n");
 }
 
+function collectGraphNodeTypes(value, acc = []) {
+  if (!value || typeof value !== "object") {
+    return acc;
+  }
+
+  if (typeof value.type === "string") {
+    acc.push(value.type);
+  }
+
+  for (const child of Object.values(value)) {
+    collectGraphNodeTypes(child, acc);
+  }
+
+  return acc;
+}
+
+export function detectPatternFitDiagnostics(options) {
+  const nodeTypes = Array.from(new Set(collectGraphNodeTypes(options.renderedGraph))).sort();
+  const managedPatterns = nodeTypes.filter((type) => type.startsWith("pattern_"));
+  const directPassed = Boolean(options.direct?.workspace_result?.passed && options.direct?.exit_code === 0);
+  const agentflowPassed = Boolean(options.agentflow?.passed);
+  const coherentImplementationTask = options.scenarioId === "workflow-orchestrator-complex";
+  const workListForCoherentTask = coherentImplementationTask && nodeTypes.includes("pattern_work_list");
+  const workListMisfit = workListForCoherentTask && directPassed && !agentflowPassed;
+  const failureTaxonomy = [];
+
+  if (workListMisfit) {
+    failureTaxonomy.push("pattern_fit");
+  }
+  if (directPassed && !agentflowPassed) {
+    failureTaxonomy.push("direct_codex_won");
+  }
+
+  return {
+    scenario_id: options.scenarioId,
+    node_types: nodeTypes,
+    managed_patterns: managedPatterns,
+    primary_pattern: managedPatterns[0] ?? nodeTypes[0] ?? "unknown",
+    coherent_implementation_task: coherentImplementationTask,
+    work_list_for_coherent_task: workListForCoherentTask,
+    direct_passed: directPassed,
+    agentflow_passed: agentflowPassed,
+    work_list_misfit: workListMisfit,
+    failure_taxonomy: Array.from(new Set(failureTaxonomy))
+  };
+}
+
 export function supportsCodexGoal(binary) {
   const result = runProcess(binary, ["exec", "--help"], { timeout_ms: 5000 });
   return result.exit_code === 0 && /(?:^|\s)--goal(?:\s|,|$)/u.test(result.stdout);
+}
+
+function pushCodexExecSettings(args, options) {
+  if (options.model) {
+    args.push("-m", options.model);
+  }
+
+  if (options.reasoning_effort) {
+    args.push("-c", `model_reasoning_effort="${options.reasoning_effort}"`);
+  }
 }
 
 export function runDirectCodexBaseline(options) {
@@ -252,6 +309,7 @@ export function runDirectCodexBaseline(options) {
     "--output-last-message",
     lastMessagePath
   ];
+  pushCodexExecSettings(args, options);
 
   if (options.goalMode) {
     args.push(
@@ -388,6 +446,8 @@ export function runPairwiseJudge(options) {
     "exec",
     "--output-last-message",
     responsePath,
+    ...(options.model ? ["-m", options.model] : []),
+    ...(options.reasoning_effort ? ["-c", `model_reasoning_effort="${options.reasoning_effort}"`] : []),
     "-"
   ], {
     input: prompt,
@@ -431,6 +491,10 @@ export function buildParityVerdict(options) {
     blockers.push("Direct Codex passed deterministic checks while Agentflow did not.");
   }
 
+  if (options.patternDiagnostics?.work_list_misfit) {
+    blockers.push("Direct Codex passed while Agentflow used pattern_work_list for a coherent implementation task; classify this as pattern-fit failure before worker-quality failure.");
+  }
+
   if (agentflowOutOfScope) {
     blockers.push("Agentflow changed files outside the allowed task scope.");
   }
@@ -464,6 +528,10 @@ export function buildParityVerdict(options) {
 
     if (!pairwise.passed) {
       blockers.push("Pairwise quality judge scored Agentflow below direct Codex.");
+    }
+
+    if (options.patternDiagnostics?.work_list_for_coherent_task && preferredMapped === "direct-codex") {
+      blockers.push("Direct Codex won while Agentflow used pattern_work_list for a coherent implementation task; classify this as pattern-fit failure before worker-quality failure.");
     }
   } else {
     blockers.push(`Pairwise quality judge failed: ${options.pairwiseJudge?.parse_error ?? "missing result"}`);
@@ -578,6 +646,8 @@ function buildOutputSummary(options) {
     score: options.verdict.passed ? 5 : 1,
     summary: options.verdict.passed
       ? "Agentflow matched or beat direct Codex on the engineering parity task."
+      : options.patternDiagnostics?.work_list_misfit
+        ? `Engineering parity failed because Agentflow selected pattern_work_list for a coherent implementation task: ${options.verdict.blockers.join("; ")}`
       : `Engineering parity failed: ${options.verdict.blockers.join("; ")}`,
     assertions: options.assertions,
     metrics: {
@@ -590,6 +660,8 @@ function buildOutputSummary(options) {
       direct_prompt_length: options.promptDiagnostics.direct_prompt_length,
       agentflow_changed_files: options.agentflow.git.changed_files.length,
       direct_changed_files: options.direct.workspace_result.git.changed_files.length,
+      primary_pattern: options.patternDiagnostics?.primary_pattern ?? "unknown",
+      pattern_failure_taxonomy: options.patternDiagnostics?.failure_taxonomy ?? [],
       pairwise: options.verdict.pairwise
     }
   };
@@ -602,6 +674,8 @@ export function runEngineeringParityCriterion(env = process.env, suiteDir = proc
   const runRoot = env.AGENTFLOW_EVAL_RUN_ROOT;
   const tracePacketFile = env.AGENTFLOW_EVAL_TRACE_PACKET_FILE;
   const codexBinary = env.AGENTFLOW_CODEX_CLI_BIN || "codex";
+  const codexModel = env.AGENTFLOW_CODEX_MODEL;
+  const codexReasoningEffort = env.AGENTFLOW_CODEX_REASONING_EFFORT;
 
   if (!scenarioId || !trialId || !outputDir || !runRoot || !tracePacketFile) {
     throw new Error("Missing Agentflow eval criterion environment.");
@@ -612,6 +686,8 @@ export function runEngineeringParityCriterion(env = process.env, suiteDir = proc
   const oracle = readJson(join(scenarioDir, "oracle.json"));
   const tracePacket = readJson(tracePacketFile);
   const trialRoot = dirname(dirname(outputDir));
+  const renderedGraphPath = join(trialRoot, "rendered-graph.json");
+  const renderedGraph = existsSync(renderedGraphPath) ? readJson(renderedGraphPath) : undefined;
   const agentflowWorkspace = join(trialRoot, "workspace", "repo");
   const taskText = readTextIfExists(join(sourceRepo, "task.md"));
   const promptInfo = loadAgentflowPrompt(runRoot);
@@ -628,7 +704,9 @@ export function runEngineeringParityCriterion(env = process.env, suiteDir = proc
     sourceRepo,
     outputDir,
     label: "direct-codex",
-    oracle
+    oracle,
+    model: codexModel,
+    reasoning_effort: codexReasoningEffort
   });
   const codexGoalSupported = supportsCodexGoal(codexBinary);
   const directGoal = codexGoalSupported
@@ -638,7 +716,9 @@ export function runEngineeringParityCriterion(env = process.env, suiteDir = proc
         outputDir,
         label: "direct-codex-goal",
         oracle,
-        goalMode: true
+        goalMode: true,
+        model: codexModel,
+        reasoning_effort: codexReasoningEffort
       })
     : undefined;
   const directPrompt = readTextIfExists(join(outputDir, "direct-codex", "prompt.md"));
@@ -650,6 +730,14 @@ export function runEngineeringParityCriterion(env = process.env, suiteDir = proc
   });
   writeJson(join(outputDir, "agentflow-prompts.json"), promptInfo.prompts);
   writeJson(join(outputDir, "prompt-diagnostics.json"), promptDiagnostics);
+  const patternDiagnostics = detectPatternFitDiagnostics({
+    renderedGraph,
+    scenarioId,
+    oracle,
+    agentflow: agentflowResult,
+    direct
+  });
+  writeJson(join(outputDir, "pattern-diagnostics.json"), patternDiagnostics);
 
   const comparisonPacket = {
     scenario_id: scenarioId,
@@ -665,7 +753,9 @@ export function runEngineeringParityCriterion(env = process.env, suiteDir = proc
     agentflow: agentflowResult,
     direct_codex: direct,
     direct_codex_goal: directGoal,
-    native_harness_records: nativeInfo.records
+    native_harness_records: nativeInfo.records,
+    rendered_graph_path: renderedGraphPath,
+    pattern_diagnostics: patternDiagnostics
   };
   writeJson(join(outputDir, "comparison-packet.json"), comparisonPacket);
 
@@ -681,14 +771,17 @@ export function runEngineeringParityCriterion(env = process.env, suiteDir = proc
   const pairwiseJudge = runPairwiseJudge({
     binary: codexBinary,
     outputDir,
-    judgePacket: pairwisePacket.judge_packet
+    judgePacket: pairwisePacket.judge_packet,
+    model: codexModel,
+    reasoning_effort: codexReasoningEffort
   });
   const verdict = buildParityVerdict({
     outputDir,
     direct,
     agentflow: agentflowResult,
     pairwiseJudge,
-    mapping: pairwisePacket.mapping
+    mapping: pairwisePacket.mapping,
+    patternDiagnostics
   });
   const serializedNative = JSON.stringify(nativeInfo.results);
   const argsLists = nativeInfo.records.flatMap((record) => findNested(record, "args"));
@@ -700,6 +793,7 @@ export function runEngineeringParityCriterion(env = process.env, suiteDir = proc
     assertion("agentflow_matches_or_beats_direct_codex", verdict.passed, JSON.stringify(verdict)),
     assertion("pairwise_quality_judge", verdict.pairwise.available && verdict.pairwise.passed, JSON.stringify(verdict.pairwise)),
     assertion("prompt_diagnostics_written", existsSync(join(outputDir, "prompt-diagnostics.json")), JSON.stringify(promptDiagnostics)),
+    assertion("pattern_diagnostics_written", existsSync(join(outputDir, "pattern-diagnostics.json")), JSON.stringify(patternDiagnostics)),
     assertion("no_ambiguous_native_resume", !serializedNative.includes("--last") && !serializedNative.includes("--continue"), argsLists.map((args) => JSON.stringify(args)).join("\n")),
     assertion("no_codex_goal_inside_agentflow", !serializedNative.includes("--goal"), argsLists.map((args) => JSON.stringify(args)).join("\n")),
     assertion("codex_goal_baseline_optional", !codexGoalSupported || Boolean(directGoal), codexGoalSupported ? "goal baseline ran" : "goal mode unavailable")
@@ -719,7 +813,8 @@ export function runEngineeringParityCriterion(env = process.env, suiteDir = proc
     directGoal,
     agentflow: agentflowResult,
     codexGoalSupported,
-    promptDiagnostics
+    promptDiagnostics,
+    patternDiagnostics
   });
   console.log(JSON.stringify(summary));
   return summary;

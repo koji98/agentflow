@@ -2,6 +2,8 @@
 
 This suite compares Agentflow worker shapes against direct Codex on the same local engineering task. The `current` variant uses one primitive `agent` node; managed variants cover `pattern_deep_work` and `pattern_work_list`. Agentflow should match or beat direct Codex implementation quality while adding durable artifacts, verification, traceability, and delivery.
 
+The `best-practice` variant intentionally has no suite-level graph override. It uses the scenario's own graph template, which lets hard scenarios define a best-practice graph while direct Codex still receives the same `task.md` as a plain user prompt.
+
 Codex Goal mode is an external baseline only. Agentflow does not activate it for normal workers; the node contract plus `af orient` are Agentflow's goal mechanism.
 
 Each scenario owns:
@@ -20,6 +22,12 @@ Run one scenario for inspection:
 
 ```bash
 agentflow eval run evals/agentflow-engineering-parity --variant current --scenario cart-total-bugfix --trials 1 --concurrency 1
+```
+
+Run the long-running best-practice comparison:
+
+```bash
+agentflow eval run evals/agentflow-engineering-parity --variant best-practice --scenario workflow-orchestrator-complex --trials 1 --concurrency 1
 ```
 
 Run the full primitive comparison:

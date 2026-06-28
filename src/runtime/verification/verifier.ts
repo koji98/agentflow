@@ -474,13 +474,13 @@ function buildFailureClosedResult(options: {
 }): OutcomeVerificationResult {
   const finding: OutcomeVerificationFinding = {
     severity: "blocker",
-    category: "verifier_unparseable",
+    category: "verification_substrate_failure",
     evidence: options.parseError,
-    recommendation: "Re-run the node so the verifier can issue a parseable verdict, or inspect the raw verifier response for adapter issues."
+    recommendation: "Rerun only outcome verification after inspecting verifier prompt/response debug files; do not redo completed worker output unless a later trusted verdict identifies a work defect."
   };
   return {
     passed: false,
-    summary: `Outcome verifier did not produce a parseable verdict: ${options.parseError}`,
+    summary: `Outcome verifier substrate failed before producing a trusted verdict: ${options.parseError}`,
     findings: [finding],
     blockers: [finding],
     verifier_metadata: {
@@ -488,6 +488,7 @@ function buildFailureClosedResult(options: {
       attempt_count: options.attemptCount,
       parse_status: "unparseable",
       parse_error: options.parseError,
+      failure_code: "verification_substrate_failure",
       ...(options.raw.length > 0 ? { raw_response_excerpt: options.raw.slice(0, 1024) } : {})
     }
   };

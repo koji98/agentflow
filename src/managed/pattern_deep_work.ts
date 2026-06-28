@@ -110,7 +110,7 @@ function formatList(title: string, values: string[] | undefined, fallback: strin
 
 function formatDraftArtifacts(artifacts: Record<string, ArtifactDefinition>): string[] {
   return Object.keys(artifacts).flatMap((name) => [
-    `- ${draftArtifactName(name)}: publish this declared artifact as the draft for final artifact \`${name}\`.`
+    `- ${draftArtifactName(name)}: Use \`af artifact write ${draftArtifactName(name)}\` to publish the draft for final artifact ${name}.`
   ]);
 }
 
@@ -259,8 +259,9 @@ function buildPlanPrompt(
       "Do not edit repository or workspace files in this planning phase. Only write the planning artifact requested below."
     ]),
     section("Output Contract", [
-      "Publish the `plan` artifact.",
-      "Write it to `plan.md` as an executor handoff, not as the final deliverable.",
+      "Publish only the declared `plan` artifact.",
+      "Use `af artifact write plan` to publish the plan content.",
+      "Do not create or edit workspace files during this planning phase.",
       "Include sections: `Task target`, `Current state`, `Gap`, `Execution plan`, `Validation plan`, `Expected material change`, `Remaining gap`, and `Risks or constraints`.",
       "Preserve exact task-specific names, labels, commands, and required phrases from the task contract in the plan.",
       "Do not create a milestone solely to restate the plan. If you do create a milestone, complete it before running `af complete check`."
@@ -313,6 +314,7 @@ function buildGenerateValidatePrompt(
     ]),
     section("Output Contract", [
       "Publish the `work_notes` artifact after doing the work.",
+      "Use `af artifact write work_notes` to publish the work notes.",
       "Include what changed, why any deviations from `plan.md` were needed, exact validation evidence, remaining risks, and any remaining gap.",
       ...draftLines
     ])

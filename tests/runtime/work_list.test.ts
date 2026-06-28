@@ -118,6 +118,7 @@ async function writeDraftItemArtifacts(invocation: AgentInvocation, options: {
   completed?: boolean;
   summary?: string;
   validationMessage?: string;
+  downstreamImplications?: string[];
 } = {}): Promise<void> {
   const itemId = options.itemId ?? (invocation.nodeGoal?.includes("`w2`") ? "w2" : "w1");
   const completed = options.completed ?? true;
@@ -137,7 +138,7 @@ async function writeDraftItemArtifacts(invocation: AgentInvocation, options: {
       { blocked: !completed }
     ),
     risks: [],
-    downstream_implications: ["Downstream nodes can consume work_items after completion."]
+    downstream_implications: options.downstreamImplications ?? ["Downstream nodes can consume work_items after completion."]
   }, null, 2)}\n`, "utf8");
 }
 
@@ -145,6 +146,7 @@ async function writeFinalItemArtifacts(invocation: AgentInvocation, options: {
   itemId?: string;
   summary?: string;
   validationMessage?: string;
+  downstreamImplications?: string[];
 } = {}): Promise<void> {
   const itemId = options.itemId ?? (invocation.nodeGoal?.includes("`w2`") ? "w2" : "w1");
   await writeFile(join(invocation.outputDir, "item-result.json"), `${JSON.stringify({
@@ -153,7 +155,7 @@ async function writeFinalItemArtifacts(invocation: AgentInvocation, options: {
     summary: options.summary ?? "Produced the evidence handoff.",
     validation: itemValidationEvidence(options.validationMessage ?? "Runtime finalizer can verify this result."),
     risks: [],
-    downstream_implications: ["Downstream nodes can consume work_items."]
+    downstream_implications: options.downstreamImplications ?? ["Downstream nodes can consume work_items."]
   }, null, 2)}\n`, "utf8");
 }
 
@@ -415,7 +417,10 @@ function buildSkippedPublisherHarness(state: { publishCalls: number }): HarnessA
   };
 }
 
-function buildParallelCriteriaHarness(state: { activeChecks: number; maxActiveChecks: number }): HarnessAdapter {
+function buildParallelCriteriaHarness(
+  state: { activeChecks: number; maxActiveChecks: number; sawOptionalEmptyPolicy?: boolean },
+  options: { downstreamImplications?: string[] } = {}
+): HarnessAdapter {
   const deliveryHarness = createPassingDeliveryHarness("codex-cli");
   return {
     kind: "codex-cli",
@@ -426,6 +431,9 @@ function buildParallelCriteriaHarness(state: { activeChecks: number; maxActiveCh
       }
 
       if (invocation.promptKind === "ai_check") {
+        if (invocation.nodeGoal?.includes("Optional risks or downstream_implications may be empty")) {
+          state.sawOptionalEmptyPolicy = true;
+        }
         state.activeChecks += 1;
         state.maxActiveChecks = Math.max(state.maxActiveChecks, state.activeChecks);
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -463,12 +471,14 @@ function buildParallelCriteriaHarness(state: { activeChecks: number; maxActiveCh
         await writeItemPlan(invocation);
       } else if (isWorkListItemExecuteInvocation(invocation)) {
         await writeDraftItemArtifacts(invocation, {
-          validationMessage: "Runtime finalizer can verify this result."
+          validationMessage: "Runtime finalizer can verify this result.",
+          downstreamImplications: options.downstreamImplications
         });
       } else if (isWorkListItemInvocation(invocation)) {
         await writeFinalItemArtifacts(invocation, {
           summary: "Produced the evidence handoff.",
-          validationMessage: "Runtime finalizer can verify this result."
+          validationMessage: "Runtime finalizer can verify this result.",
+          downstreamImplications: options.downstreamImplications
         });
       } else if (invocation.nodeGoal?.includes("final artifacts")) {
         await writeFile(join(invocation.outputDir, "summary.md"), "Completed one frozen work-list item.\n", "utf8");
@@ -484,6 +494,148 @@ function buildParallelCriteriaHarness(state: { activeChecks: number; maxActiveCh
     },
     async cancel() {
       return;
+    }
+  };
+}
+
+function buildMalformedCriterionHarness(): HarnessAdapter {
+  const deliveryHarness = createPassingDeliveryHarness("codex-cli");
+  return {
+    kind: "codex-cli",
+    capabilities: getHarnessCapabilities("codex-cli")!,
+    async run(invocation: AgentInvocation) {
+      if (invocation.promptKind === "delivery_curator") {
+        return deliveryHarness.run(invocation);
+      }
+
+      if (invocation.promptKind === "ai_check") {
+        return {
+          status: "passed",
+          exitCode: 0,
+          stdout: "not valid json"
+        };
+      }
+
+      if (invocation.promptKind === "outcome_verification") {
+        return {
+          status: "passed",
+          exitCode: 0,
+          transcript: {
+            last_message: [
+              "```json",
+              JSON.stringify({ passed: true, summary: "Verifier accepted the artifacts.", findings: [] }),
+              "```"
+            ].join("\n")
+          }
+        };
+      }
+
+      if (isWorkListPlannerInvocation(invocation)) {
+        await writeFile(join(invocation.outputDir, "work-list.json"), plannedWorkListJson(), "utf8");
+      } else if (isWorkListItemPlanInvocation(invocation)) {
+        await writeItemPlan(invocation);
+      } else if (isWorkListItemExecuteInvocation(invocation)) {
+        await writeDraftItemArtifacts(invocation, {
+          validationMessage: "Runtime finalizer can verify this result."
+        });
+      } else if (isWorkListItemInvocation(invocation)) {
+        await writeFinalItemArtifacts(invocation, {
+          summary: "Produced the evidence handoff.",
+          validationMessage: "Runtime finalizer can verify this result."
+        });
+      }
+
+      const result = {
+        status: "passed" as const,
+        exitCode: 0,
+        transcript: { last_message: "done" }
+      };
+      await markInvocationRuntimeReady(invocation, result);
+      return result;
+    },
+    async cancel() {
+      return;
+    }
+  };
+}
+
+function buildDraftValidationObjectFailureHarness(state: { executeCalls: number; sawContractFailureContext: boolean }): HarnessAdapter {
+  const deliveryHarness = createPassingDeliveryHarness("codex-cli");
+  return {
+    kind: "codex-cli",
+    capabilities: getHarnessCapabilities("codex-cli")!,
+    async run(invocation: AgentInvocation) {
+      if (invocation.promptKind === "delivery_curator") {
+        return deliveryHarness.run(invocation);
+      }
+
+      if (invocation.promptKind === "outcome_verification") {
+        return {
+          status: "passed",
+          exitCode: 0,
+          transcript: {
+            last_message: [
+              "```json",
+              JSON.stringify({ passed: true, summary: "Work-list validation-entry retry verifier accepted the artifacts.", findings: [] }),
+              "```"
+            ].join("\n")
+          }
+        };
+      }
+
+      if (isWorkListPlannerInvocation(invocation)) {
+        await writeFile(join(invocation.outputDir, "work-list.json"), plannedWorkListJson(), "utf8");
+      } else if (isWorkListItemPlanInvocation(invocation)) {
+        await writeItemPlan(invocation);
+      } else if (isWorkListItemExecuteInvocation(invocation)) {
+        state.executeCalls += 1;
+        if (state.executeCalls > 1 && invocation.contextManifest?.includes("managed_contract_failure")) {
+          state.sawContractFailureContext = true;
+        }
+        await writeFile(join(invocation.outputDir, "item-work-notes.md"), "# Item Work Notes\n\nExecuted with evidence.\n", "utf8");
+        await writeFile(
+          join(invocation.outputDir, "draft-item-result.json"),
+          state.executeCalls === 1
+            ? `${JSON.stringify({
+                id: "w1",
+                status: "completed",
+                summary: "Produced validation evidence as object entries.",
+                validation: {
+                  passed: [{ command: "npm test", evidence: "Passed locally." }],
+                  failed_then_fixed: [],
+                  unavailable: [],
+                  blocked: []
+                },
+                risks: [],
+                downstream_implications: ["Downstream nodes can consume work_items after completion."]
+              }, null, 2)}\n`
+            : `${JSON.stringify({
+                id: "w1",
+                status: "completed",
+                summary: "Produced repaired string validation evidence.",
+                validation: itemValidationEvidence("npm test passed locally."),
+                risks: [],
+                downstream_implications: ["Downstream nodes can consume work_items after completion."]
+              }, null, 2)}\n`,
+          "utf8"
+        );
+      } else if (isWorkListItemInvocation(invocation)) {
+        await writeFinalItemArtifacts(invocation, {
+          summary: "Produced repaired string validation evidence.",
+          validationMessage: "Runtime finalizer can verify this result."
+        });
+      } else if (invocation.nodeGoal?.includes("final artifacts")) {
+        await writeFile(join(invocation.outputDir, "summary.md"), "Completed one frozen work-list item after validation-entry repair.\n", "utf8");
+      } else {
+        throw new Error(`Unexpected invocation ${invocation.authoredId}`);
+      }
+
+      markInvocationRuntimeReady(invocation);
+      return {
+        status: "passed",
+        exitCode: 0,
+        transcript: { last_message: "done" }
+      };
     }
   };
 }
@@ -1080,11 +1232,14 @@ describe("runtime pattern_work_list", () => {
     expect(firstItemPrompt).toContain("## Item Output Contract");
     expect(firstItemPrompt).toContain("field id set to the current frozen item id");
     expect(firstItemPrompt).toContain("passed, failed_then_fixed, unavailable, and blocked keys");
+    expect(firstItemPrompt).toContain("Use `af artifact write item_result` to publish the item result.");
+    expect(firstItemPrompt).toContain("JSON with this exact shape");
+    expect(firstItemPrompt).toContain('"validation": {');
+    expect(firstItemPrompt).toContain('"passed": ["<short evidence string>"]');
+    expect(firstItemPrompt).toContain('"failed_then_fixed": []');
     expect(firstItemPrompt).toContain("Use failed_then_fixed, not fixed.");
     expect(firstItemPrompt).toContain("add/edit tests only when the task asks or repo contract expects them");
     expect(firstItemPrompt).toContain("Do not use field item_id.");
-    expect(firstItemPrompt).not.toContain("JSON with this exact shape");
-    expect(firstItemPrompt).not.toContain('"failed_then_fixed": []');
     const publishAttempt = attempts.find((attempt) => attempt.authored_id === "deliver");
     const workItems = JSON.parse(await readFile(publishAttempt!.artifacts.work_items, "utf8")) as {
       item_count: number;
@@ -1401,6 +1556,107 @@ describe("runtime pattern_work_list", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
+  it("reports object-shaped validation evidence entries as precise draft item contract failures", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-work-list-validation-entry-contract-failure-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-work-list-validation-entry-contract-failure",
+      intent: {
+        goal: "Exercise precise managed validation-entry contract repair.",
+        acceptance_criteria: ["The work-list pattern retries only the current item with precise validation-entry evidence."]
+      },
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default", workspace_backend: "inplace" },
+      profiles: {
+        default: { harness: "codex-cli", sandbox: "workspace-write" },
+        supervisor: { harness: "codex-cli", sandbox: "read-only" }
+      },
+      supervision: { profile: "supervisor", max_total_interventions: 0 },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "pattern_work_list",
+            id: "deliver",
+            runtime: { repo: "main", profile: "default" },
+            intent: {
+              goal: "Deliver a bounded runtime-test work list with validation-entry contract repair.",
+              acceptance_criteria: ["The work_items artifact lists completed items."],
+              constraints: []
+            },
+            work_list: {
+              planning_goal: "Discover the ordered runtime-test items.",
+              item_guidance: {
+                what_counts_as_one_item: "One coherent runtime-test unit.",
+                done_when: ["The item has evidence and validation."]
+              },
+              item_worker: {
+                kind: "deep_work",
+                completion: {
+                  max_cycles: 2,
+                  pass_threshold: 1,
+                  criteria: [
+                    {
+                      id: "command_ok",
+                      kind: "command",
+                      command: "true",
+                      weight: 1,
+                      required: true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const state = { executeCalls: 0, sawContractFailureContext: false };
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: { main: repoDir },
+      harnesses: {
+        "codex-cli": buildDraftValidationObjectFailureHarness(state)
+      }
+    });
+
+    expect(run.outcome).toBe("passed");
+    expect(state.executeCalls).toBe(2);
+    expect(state.sawContractFailureContext).toBe(true);
+    const attempts = await readRunExecutionAttempts(runRoot);
+    const executeAttempts = attempts
+      .filter((attempt) => attempt.authored_id === "deliver__managed__pattern_work_list__run_items__item_w1__execute")
+      .sort((left, right) => left.attempt_index - right.attempt_index);
+    expect(executeAttempts).toHaveLength(2);
+    const failurePacket = JSON.parse(await readFile(
+      join(executeAttempts[0]!.execution_dir, "runtime", "managed-contract-failure.json"),
+      "utf8"
+    )) as {
+      findings: Array<{
+        message: string;
+        expected: string;
+        required_next_action: string;
+      }>;
+    };
+    expect(failurePacket.findings).toEqual([
+      expect.objectContaining({
+        message: "draft-item-result.json validation.passed[0] must be a non-empty string, not object.",
+        expected: "Every validation.passed entry is a short evidence string.",
+        required_next_action: "Replace validation.passed[0] with a string evidence entry in draft-item-result.json for item w1."
+      })
+    ]);
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
   it("skips the deep-work item publisher when deterministic promotion is enough", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-work-list-skip-item-publisher-"));
     const repoDir = join(tempRoot, "repo");
@@ -1699,6 +1955,182 @@ describe("runtime pattern_work_list", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
+  it("accepts empty downstream implications when item evidence has none", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-work-list-empty-downstream-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-work-list-empty-downstream",
+      intent: {
+        goal: "Exercise optional empty item evidence arrays.",
+        acceptance_criteria: ["The work-list pattern accepts truthful empty downstream implications."]
+      },
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default", workspace_backend: "inplace" },
+      profiles: {
+        default: { harness: "codex-cli", sandbox: "workspace-write" },
+        supervisor: { harness: "codex-cli", sandbox: "read-only" }
+      },
+      supervision: { profile: "supervisor", max_total_interventions: 0 },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "pattern_work_list",
+            id: "deliver",
+            runtime: { repo: "main", profile: "default" },
+            intent: {
+              goal: "Deliver a bounded runtime-test work list with no downstream implications.",
+              acceptance_criteria: ["The work_items artifact lists completed items."],
+              constraints: []
+            },
+            work_list: {
+              planning_goal: "Discover the ordered runtime-test items.",
+              item_guidance: {
+                what_counts_as_one_item: "One coherent runtime-test unit.",
+                done_when: ["The item has evidence and validation."]
+              },
+              item_worker: {
+                kind: "deep_work",
+                completion: {
+                  max_cycles: 1,
+                  pass_threshold: 1,
+                  criteria: [
+                    {
+                      id: "contract",
+                      kind: "rubric",
+                      target: "workspace",
+                      rubric: "The item satisfies its contract.",
+                      weight: 1,
+                      required: true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const state = { activeChecks: 0, maxActiveChecks: 0, sawOptionalEmptyPolicy: false };
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: { main: repoDir },
+      harnesses: {
+        "codex-cli": buildParallelCriteriaHarness(state, { downstreamImplications: [] })
+      }
+    });
+
+    expect(run.outcome).toBe("passed");
+    expect(state.sawOptionalEmptyPolicy).toBe(true);
+    const attempts = await readRunExecutionAttempts(runRoot);
+    const publishAttempt = attempts.find((attempt) => attempt.authored_id === "deliver");
+    const workItems = JSON.parse(await readFile(publishAttempt!.artifacts.work_items!, "utf8")) as {
+      items: Array<{ downstream_implications: string[] }>;
+    };
+    expect(workItems.items[0]!.downstream_implications).toEqual([]);
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("classifies malformed managed criterion output as verifier substrate failure", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-work-list-criterion-substrate-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-work-list-criterion-substrate",
+      intent: {
+        goal: "Exercise managed criterion substrate failure classification.",
+        acceptance_criteria: ["Malformed criterion verifier output is not treated as semantic item failure."]
+      },
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default", workspace_backend: "inplace" },
+      profiles: {
+        default: { harness: "codex-cli", sandbox: "workspace-write" },
+        supervisor: { harness: "codex-cli", sandbox: "read-only" }
+      },
+      supervision: { profile: "supervisor", max_total_interventions: 0 },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "pattern_work_list",
+            id: "deliver",
+            runtime: { repo: "main", profile: "default" },
+            intent: {
+              goal: "Deliver a bounded runtime-test work list with criterion substrate failure.",
+              acceptance_criteria: ["The work_items artifact lists completed items."],
+              constraints: []
+            },
+            work_list: {
+              planning_goal: "Discover the ordered runtime-test items.",
+              item_guidance: {
+                what_counts_as_one_item: "One coherent runtime-test unit.",
+                done_when: ["The item has evidence and validation."]
+              },
+              item_worker: {
+                kind: "deep_work",
+                completion: {
+                  max_cycles: 1,
+                  pass_threshold: 1,
+                  criteria: [
+                    {
+                      id: "contract",
+                      kind: "rubric",
+                      target: "workspace",
+                      rubric: "The item satisfies its contract.",
+                      weight: 1,
+                      required: true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: { main: repoDir },
+      harnesses: {
+        "codex-cli": buildMalformedCriterionHarness()
+      }
+    });
+
+    expect(run.outcome).toBe("failed");
+    const attempts = await readRunExecutionAttempts(runRoot);
+    const failedAttempts = attempts.filter((attempt) => attempt.status === "failed");
+    expect(failedAttempts.some((attempt) => attempt.metadata.failure_code === "verification_substrate_failure")).toBe(true);
+    const itemAttempt = attempts.find((attempt) =>
+      attempt.authored_id === "deliver__managed__pattern_work_list__run_items__item_w1"
+    );
+    expect(itemAttempt).toBeDefined();
+    const verification = JSON.parse(await readFile(
+      join(itemAttempt!.execution_dir, "criteria", "01-contract", "verification.json"),
+      "utf8"
+    )) as { failure_code?: string; summary?: string };
+    expect(verification.failure_code).toBe("verification_substrate_failure");
+    expect(verification.summary).toContain("structured JSON");
+    await expect(readFile(join(itemAttempt!.execution_dir, "artifacts", "scorecard.json"), "utf8")).rejects.toThrow();
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
   it("retries a required item criterion that scores below the item threshold", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-work-list-required-score-threshold-"));
     const repoDir = join(tempRoot, "repo");
@@ -1950,10 +2382,22 @@ describe("runtime pattern_work_list", () => {
     expect(planAttempt).toBeDefined();
     const planPrompt = await readFile(join(planAttempt!.execution_dir, "agent", "prompt.md"), "utf8");
     expect(planPrompt).toContain("Preserve exact task-specific names, labels, commands, and required phrases from the parent work-list and current item contract in the plan.");
-    expect(planPrompt).toContain("Write it to `plan.md` as the executor handoff for this frozen item, not as the final item result.");
+    expect(planPrompt).toContain("Publish only the declared `plan` artifact.");
+    expect(planPrompt).toContain("Use `af artifact write plan` to publish the plan content.");
+    expect(planPrompt).toContain("Do not create or edit workspace files during this planning phase.");
+    expect(planPrompt).not.toContain("Write it to `plan.md` as the executor handoff for this frozen item, not as the final item result.");
     expect(planPrompt).not.toContain("item_cycle_plan");
     expect(planPrompt).not.toContain("item-cycle-plan.md");
     expect(planPrompt).not.toContain("smallest justified deviation");
+    const executePrompt = await readFile(join(executeAttempt!.execution_dir, "agent", "prompt.md"), "utf8");
+    expect(executePrompt).toContain("Use `af artifact write item_work_notes` to publish item work notes.");
+    expect(executePrompt).toContain("Use `af artifact write draft_item_result` to publish the draft item result.");
+    expect(executePrompt).toContain("The `draft_item_result` JSON must use this exact shape:");
+    expect(executePrompt).toContain('"validation": {');
+    expect(executePrompt).toContain('"passed": ["<short evidence string>"]');
+    expect(executePrompt).toContain('"failed_then_fixed": []');
+    expect(executePrompt).toContain("Each validation array must contain strings only, not objects.");
+    expect(executePrompt).not.toContain("The draft item result JSON uses the same shape as the final item result");
     const executeContext = await readFile(join(executeAttempt!.execution_dir, "agent", "context.md"), "utf8");
     const planContext = await readFile(join(planAttempt!.execution_dir, "agent", "context.md"), "utf8");
     expect(executeContext).toContain("EXECUTE_SUPPORT_CONTEXT_MARKER");

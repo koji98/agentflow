@@ -390,6 +390,21 @@ describe("af runtime CLI", () => {
                 exitCode: 2,
                 stdout: expect.stringContaining("not allowed by the worker command policy")
             });
+        await expect(executeAfCli(["spawn", "--help"]))
+            .resolves.toMatchObject({
+                exitCode: 2,
+                stdout: expect.stringContaining("not allowed by the worker command policy")
+            });
+        await expect(executeAfCli(["diagnose", "--help"]))
+            .resolves.toMatchObject({
+                exitCode: 2,
+                stdout: expect.stringContaining("not allowed by the worker command policy")
+            });
+        await expect(executeAfCli(["learn", "--help"]))
+            .resolves.toMatchObject({
+                exitCode: 2,
+                stdout: expect.stringContaining("not allowed by the worker command policy")
+            });
         await expect(executeAfCli([
             "_helper-run",
             "--metadata",
@@ -400,6 +415,33 @@ describe("af runtime CLI", () => {
             exitCode: 2,
             stdout: expect.stringContaining("_helper-run is internal Agentflow runtime transport")
         });
+    });
+    it("renders exact next commands for active milestones in orientation and completion output", async () => {
+        const runtime = await createRuntime(tempRoot, {});
+        process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
+        const added = outputOf<{
+            milestone: { id: string };
+        }>(await executeAfCli([
+            "milestone",
+            "add",
+            "--title",
+            "Validate behavior",
+            "--goal",
+            "Run the targeted tests and record evidence"
+        ]));
+        expect(added.milestone.id).toBe("m1");
+        const orient = await executeAfCli(["orient"]);
+        expect(orient.exitCode).toBe(0);
+        expect(orient.stdout).toContain("## Milestone Next Actions");
+        expect(orient.stdout).toContain("`af milestone complete m1 --evidence <text>`");
+        expect(orient.stdout).toContain("`af milestone block m1 --blocked-on <text> --recoverable-by <text> --evidence <text>`");
+        const check = await executeAfCli(["complete", "check"]);
+        expect(check.exitCode).toBe(1);
+        expect(check.output).toEqual(expect.objectContaining({
+            next_actions: expect.arrayContaining([
+                "Complete active milestone m1 with `af milestone complete m1 --evidence <text>` or block it with `af milestone block m1 --blocked-on <text> --recoverable-by <text> --evidence <text>`."
+            ])
+        }));
     });
     it("renders full refresh orientation after a prior successful orient call", async () => {
         const runtime = await createRuntime(tempRoot);
@@ -1285,8 +1327,10 @@ describe("af runtime CLI", () => {
         expect(spawned.agent.sandbox).toBe("read-only");
         expect(spawned.agent.input_case_file).toBe(join(runtime.root, "case-file.json"));
         await expect(readFile(spawned.artifact, "utf8")).resolves.toContain("helper ok");
-        await expect(readFile(spawned.agent.prompt_path!, "utf8")).resolves.toContain("evidence mapper");
-        await expect(readFile(spawned.agent.prompt_path!, "utf8")).resolves.toContain("Do not request human pause or approval");
+        const helperPrompt = await readFile(spawned.agent.prompt_path!, "utf8");
+        expect(helperPrompt).toContain("evidence mapper");
+        expect(helperPrompt).toContain("Do not request human pause or approval");
+        expect(helperPrompt).toContain("Before the final response: run `af orient`, complete every helper milestone, publish the required artifact with `af artifact write helper-report.md`, then run `af complete check`.");
     });
     it.each([
         ["evidence_mapper", "investigation", "evidence mapper"],

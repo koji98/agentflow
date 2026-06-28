@@ -95,10 +95,12 @@ function listOrFallback(title: string, values: string[] | undefined, fallback: s
 }
 
 function formatPublicArtifacts(artifacts: Record<string, ArtifactDefinition>): string[] {
-  return Object.entries(artifacts).flatMap(([name, artifact]) => [
-    `- ${name}: publish this declared artifact; the Declared Artifacts table shows the exact command.`,
-    `  ${artifact.description}`
-  ]);
+  return Object.entries(artifacts)
+    .filter(([name]) => name !== "work_items")
+    .flatMap(([name, artifact]) => [
+      `- ${name}: Use \`af artifact write ${name}\` to publish this final artifact.`,
+      `  ${artifact.description}`
+    ]);
 }
 
 function formatCriteria(criteria: PatternWorkListCompletionCriterion[]): string[] {
@@ -136,6 +138,8 @@ function buildPlannerPrompt(config: PatternWorkListConfig) {
     ]),
     section("Output Contract", [
       "Publish only the `work_list_json` artifact.",
+      "Use `af artifact write work_list_json` to publish the work list JSON.",
+      "Do not create or edit workspace files during this planning phase.",
       "Use this exact JSON shape:",
       '{"planning_summary":"why this finite list satisfies the node contract","ordering_rationale":"why this order is correct","items":[{"id":"w1","title":"short label","goal":"item outcome","acceptance_criteria":["concrete success condition"],"constraints":["item boundary"],"validation_expectations":["validation or evidence expected"],"handoff_focus":["what later items or reviewers need"],"rationale":"why this item exists and has this boundary"}]}',
       "Use sequential ids starting at `w1` with no gaps."

@@ -1,0 +1,65 @@
+{
+  "id": "workflow-orchestrator-complex",
+  "bucket": "engineering-parity",
+  "difficulty": "hard",
+  "description": "Build a small async workflow orchestrator with dependency scheduling, retries, failure propagation, validation, and Markdown reporting.",
+  "measurement": {
+    "claim": "Agentflow should match or beat direct Codex on a long-running, multi-concern implementation task when Agentflow receives a best-practice graph and direct Codex receives the same detailed task plan as a plain prompt.",
+    "scenario_type": "parity:long-running-engineering",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "workspace scope",
+      "delivery auditability",
+      "direct Codex parity",
+      "prompt/context overhead"
+    ],
+    "expected_failure_modes": [
+      "the implementation misses dependency ordering, validation, retry, skip, or reporting behavior",
+      "the final validation command fails or is not captured",
+      "workspace changes are missing, forbidden, or out of scope",
+      "handoff evidence is missing, stale, or too vague to audit",
+      "Agentflow underperforms the direct Codex baseline on deterministic or quality evidence",
+      "Agentflow prompt surfaces leak graph mechanics or add avoidable context noise"
+    ],
+    "tweak_signal": "Inspect Agentflow versus direct Codex deltas, final validation behavior, item-level evidence, prompt diagnostics, scope control, and handoff quality before changing prompt packs or managed-pattern behavior."
+  },
+  "workflow": {
+    "graph_template": "graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "repo",
+    "init_git": true
+  },
+  "metadata": {
+    "validation_command": "npm test"
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "npm test"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": [
+        "task.md",
+        "package.json",
+        "test/orchestrator.test.js"
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
+    "engineering-parity": {}
+  }
+}

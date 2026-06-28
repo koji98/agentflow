@@ -44,6 +44,7 @@ import {
   helperPurposes,
   milestoneLogKinds,
   persistCompletionPacket,
+  type CompletionPacket,
   type HelperPurpose,
   type RuntimeLogEntry,
   type RuntimeMilestone,
@@ -438,6 +439,28 @@ function renderMilestoneList(milestones: RuntimeMilestone[]): string {
   ].join("\n");
 }
 
+function milestoneCompleteCommand(id: string): string {
+  return `af milestone complete ${id} --evidence <text>`;
+}
+
+function milestoneBlockCommand(id: string): string {
+  return `af milestone block ${id} --blocked-on <text> --recoverable-by <text> --evidence <text>`;
+}
+
+function renderMilestoneNextActions(milestones: RuntimeMilestone[]): string[] {
+  const active = milestones.filter((milestone) => milestone.status === "active");
+  if (active.length === 0) {
+    return [];
+  }
+
+  return [
+    "## Milestone Next Actions",
+    ...active.map((milestone) =>
+      `- \`${milestone.id}\`: complete with \`${milestoneCompleteCommand(milestone.id)}\` or block with \`${milestoneBlockCommand(milestone.id)}\`.`
+    )
+  ];
+}
+
 function requireRuntimeMetadata(): RuntimeMetadata {
   const metadataPath = process.env.AGENTFLOW_RUNTIME_METADATA;
   if (!metadataPath) {
@@ -445,6 +468,19 @@ function requireRuntimeMetadata(): RuntimeMetadata {
   }
 
   return JSON.parse(readFileSync(metadataPath, "utf8")) as RuntimeMetadata;
+}
+
+function optionalRuntimeMetadata(): RuntimeMetadata | undefined {
+  const metadataPath = process.env.AGENTFLOW_RUNTIME_METADATA;
+  if (!metadataPath) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(readFileSync(metadataPath, "utf8")) as RuntimeMetadata;
+  } catch {
+    return undefined;
+  }
 }
 
 function afCommandPolicyFailure(metadata: RuntimeMetadata, argv: string[]): AfResult | undefined {
@@ -1164,6 +1200,7 @@ async function commandOrient(metadata: RuntimeMetadata): Promise<AfResult> {
       ].join("\n") + "\n"
     };
   }
+  const milestoneNextActions = renderMilestoneNextActions(milestoneState.milestones);
   const lines = [
     "# Agentflow Orientation",
     "",
@@ -1200,7 +1237,10 @@ async function commandOrient(metadata: RuntimeMetadata): Promise<AfResult> {
     ...renderToolSummary(metadata, node),
     "",
     "## Milestones",
-    renderMilestoneList(milestoneState.milestones)
+    renderMilestoneList(milestoneState.milestones),
+    ...(milestoneNextActions.length > 0
+      ? ["", ...milestoneNextActions]
+      : [])
   ];
 
   return {
@@ -1286,6 +1326,24 @@ function agentFacingOrientationSummary(summary: RuntimeOrientationSummary): Omit
   };
 }
 
+function agentFacingNextActions(packet: CompletionPacket): string[] {
+  const actions: string[] = [];
+  if (!packet.orientation.orient_called) {
+    actions.push("Run `af orient` before continuing.");
+  }
+  for (const milestone of packet.milestones.milestones) {
+    if (milestone.status === "active") {
+      actions.push(
+        `Complete active milestone ${milestone.id} with \`${milestoneCompleteCommand(milestone.id)}\` or block it with \`${milestoneBlockCommand(milestone.id)}\`.`
+      );
+    }
+  }
+  for (const name of packet.missing_artifacts) {
+    actions.push(`Publish missing artifact ${name} with \`af artifact write ${name}\`.`);
+  }
+  return [...new Set(actions)];
+}
+
 function completionPacketPathForMetadata(metadata: RuntimeMetadata): string {
   return resolveExecutionRuntimeCompletionPacketPath(dirname(metadata.output_dir));
 }
@@ -1364,7 +1422,8 @@ async function commandCompleteCheck(metadata: RuntimeMetadata): Promise<AfResult
       operator_observations: packet.operator_observations,
       active_blockers: packet.active_blockers,
       supervisor_recovery: packet.supervisor_recovery,
-      managed: packet.managed
+      managed: packet.managed,
+      next_actions: agentFacingNextActions(packet)
     }
   };
   });
@@ -2259,11 +2318,11 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
     "- Use `af orient` to inspect this helper session.",
     "- Understand the helper task and relevant parent context before committing to execution milestones.",
     "- Use `af milestone add`, `af milestone log`, and `af milestone complete` to track macro progress with evidence.",
-    "- Use `af artifact write <name>` to publish the required artifact from stdin, or `af artifact write <name> --file <path>` for an existing workspace/output file.",
+    `- Use \`af artifact write ${artifactName}\` to publish the required artifact from stdin, or \`af artifact write ${artifactName} --file <path>\` for an existing workspace/output file.`,
     ...(toolContract.length > 0 ? ["", ...toolContract] : []),
     "",
     "## Completion Gate",
-    "Before the final response: orient, complete every helper milestone, publish the required artifact, and keep the handoff to outcome, artifact, validation, and blockers."
+    `Before the final response: run \`af orient\`, complete every helper milestone, publish the required artifact with \`af artifact write ${artifactName}\`, then run \`af complete check\`.`
   ].join("\n");
   const promptPath = session.prompt_path ?? join(dirname(helperPath(parentMetadata, helperId)), "prompt.md");
   const promptBody = `${prompt}\n`;
@@ -2483,6 +2542,13 @@ export async function executeAfCli(argv: string[]): Promise<AfResult> {
     return { exitCode: 0, stdout: renderHelp() };
   }
   if (options.help === true) {
+    const metadata = optionalRuntimeMetadata();
+    if (metadata) {
+      const policyFailure = afCommandPolicyFailure(metadata, positionals);
+      if (policyFailure) {
+        return policyFailure;
+      }
+    }
     return { exitCode: 0, stdout: renderCommandHelp(positionals) };
   }
 

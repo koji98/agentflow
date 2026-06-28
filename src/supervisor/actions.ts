@@ -183,16 +183,17 @@ function renderArtifactRepairBrief(options: {
   prior_response_path: string;
   previous_attempt_evidence_paths: string[];
 }): string {
+  const artifactWriteCommand = (name: string) => `af artifact write ${name}`;
   return [
     "# Artifact Repair Brief",
     "",
     "This brief is runtime-authored for the repair agent. Raw harness logs and debug files remain audit-only.",
     "",
     "## Missing Artifacts",
-    "| Name | Declared Path | Description |",
-    "| --- | --- | --- |",
+    "| Name | Write Command | Declared Path | Description |",
+    "| --- | --- | --- | --- |",
     ...options.missing_artifacts.map((artifact) =>
-      `| \`${artifact.name}\` | \`${artifact.path}\` | ${artifact.description.replace(/\r?\n/gu, " ").replace(/\|/gu, "\\|")} |`
+      `| \`${artifact.name}\` | \`${artifactWriteCommand(artifact.name)}\` | \`${artifact.path}\` | ${artifact.description.replace(/\r?\n/gu, " ").replace(/\|/gu, "\\|")} |`
     ),
     "",
     "## Evidence Pointers",
@@ -205,7 +206,7 @@ function renderArtifactRepairBrief(options: {
     `- Attempt: ${options.repair_attempt} of ${options.max_attempts}`,
     "- Preserve the original node goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts.",
     "- Inspect only the evidence needed to produce the missing declared artifacts.",
-    "- Publish each missing artifact with `af artifact write <name>` and finish with `af complete check`."
+    "- Publish each missing artifact with the exact command listed above and finish with `af complete check`."
   ].join("\n");
 }
 

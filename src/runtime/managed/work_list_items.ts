@@ -320,6 +320,7 @@ function validateManagedItemValidationContract(options: {
     return undefined;
   }
 
+  const findingCountBeforeEntryChecks = options.findings.length;
   const validation = {
     passed: stringArray(options.value.passed),
     failed_then_fixed: stringArray(options.value.failed_then_fixed),
@@ -339,13 +340,31 @@ function validateManagedItemValidationContract(options: {
         expected: "Every validation channel is represented as an array of evidence strings.",
         requiredNextAction: `Set validation.${key} to an array in ${options.fileName} for item ${options.item.id}.`
       }));
+      continue;
     }
+
+    options.value[key].forEach((entry, index) => {
+      if (typeof entry === "string" && entry.trim().length > 0) {
+        return;
+      }
+      options.findings.push(workListContractFinding({
+        phase: options.phase,
+        itemId: options.item.id,
+        artifactName: options.artifactName,
+        artifactPath: options.artifactPath,
+        failureKind: "schema_mismatch",
+        message: `${options.fileName} validation.${key}[${index}] must be a non-empty string, not ${jsonValueTypeName(entry)}.`,
+        expected: `Every validation.${key} entry is a short evidence string.`,
+        requiredNextAction: `Replace validation.${key}[${index}] with a string evidence entry in ${options.fileName} for item ${options.item.id}.`
+      }));
+    });
   }
 
   if (
     validation.passed.length === 0 &&
     validation.failed_then_fixed.length === 0 &&
-    validation.unavailable.length === 0
+    validation.unavailable.length === 0 &&
+    options.findings.length === findingCountBeforeEntryChecks
   ) {
     options.findings.push(workListContractFinding({
       phase: options.phase,
@@ -363,6 +382,19 @@ function validateManagedItemValidationContract(options: {
   }
 
   return validation;
+}
+
+function jsonValueTypeName(value: unknown): string {
+  if (value === null) {
+    return "null";
+  }
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  if (typeof value === "string" && value.trim().length === 0) {
+    return "empty string";
+  }
+  return typeof value;
 }
 
 function validateManagedWorkListItemResultContract(options: {
@@ -992,11 +1024,41 @@ function buildManagedWorkListItemGoal(options: {
     "## Item Output Contract",
     "Write exactly these declared item artifacts:",
     "- `item_result`: JSON object using the active item-result contract: field id set to the current frozen item id, completed status, concrete summary, validation object, risks, and downstream implications. The validation object has passed, failed_then_fixed, unavailable, and blocked keys; each value is an array of short evidence strings. Use failed_then_fixed, not fixed. Do not use field item_id.",
+    "Use `af artifact write item_result` to publish the item result.",
+    ...managedWorkListItemResultSchemaLines("item_result"),
     "",
     "If the item requires branch, base, PR, or workspace evidence, use inspectable local workspace evidence unless the graph explicitly says otherwise. Remote-only branch or PR updates are not a substitute for local branch/base evidence.",
     "",
     "Do not work on later frozen items. Do not add, remove, split, merge, or reorder work-list items."
   ].join("\n");
+}
+
+function managedWorkListItemResultSchemaLines(artifactName: "item_result" | "draft_item_result"): string[] {
+  const openingLine = artifactName === "draft_item_result"
+    ? "The `draft_item_result` JSON must use this exact shape:"
+    : "JSON with this exact shape:";
+  return [
+    openingLine,
+    "```json",
+    "{",
+    "  \"id\": \"<current frozen item id>\",",
+    "  \"status\": \"completed\",",
+    "  \"summary\": \"<concrete summary of completed item work>\",",
+    "  \"validation\": {",
+    "    \"passed\": [\"<short evidence string>\"],",
+    "    \"failed_then_fixed\": [],",
+    "    \"unavailable\": [],",
+    "    \"blocked\": []",
+    "  },",
+    "  \"risks\": [],",
+    "  \"downstream_implications\": []",
+    "}",
+    "```",
+    "Each validation array must contain strings only, not objects.",
+    "Use id, not item_id; use failed_then_fixed, not fixed.",
+    "Empty risks or downstream_implications arrays are valid when no such evidence applies.",
+    "For a completed item, at least one of validation.passed, validation.failed_then_fixed, or validation.unavailable must contain evidence."
+  ];
 }
 
 function phaseContractLines(
@@ -1048,8 +1110,9 @@ function buildManagedWorkListItemPlanGoal(options: {
     ...phaseContractLines(options.worker, "plan"),
     "",
     "Output contract:",
-    "Publish only the `plan` artifact.",
-    "Write it to `plan.md` as the executor handoff for this frozen item, not as the final item result.",
+    "Publish only the declared `plan` artifact.",
+    "Use `af artifact write plan` to publish the plan content.",
+    "Do not create or edit workspace files during this planning phase.",
     "Include sections: Task target, Current state, Gap, Execution plan, Validation plan, Expected material change, Remaining gap, and Risks or constraints.",
     "Preserve exact task-specific names, labels, commands, and required phrases from the parent work-list and current item contract in the plan.",
     "Do not create a milestone solely to restate the plan. If you do create a milestone, complete it before running `af complete check`."
@@ -1080,8 +1143,10 @@ function buildManagedWorkListItemExecuteGoal(options: {
     "",
     "Output contract:",
     "Publish `item_work_notes` and `draft_item_result`.",
+    "Use `af artifact write item_work_notes` to publish item work notes.",
+    "Use `af artifact write draft_item_result` to publish the draft item result.",
     "`item_work_notes` should include what changed, why any deviations from `plan.md` were needed, validation evidence, remaining risks, and any remaining gap.",
-    "The draft item result JSON uses the same shape as the final item result and must use the current frozen item id."
+    ...managedWorkListItemResultSchemaLines("draft_item_result")
   ].join("\n");
 }
 
@@ -1104,7 +1169,8 @@ function buildManagedWorkListItemPublishGoal(options: {
     "",
     "Output contract:",
     "Publish exactly these final declared item artifacts:",
-    "- `item_result`: JSON with id, status completed, summary, validation, risks, and downstream_implications."
+    "- `item_result`: JSON with id, status completed, summary, validation, risks, and downstream_implications.",
+    "Use `af artifact write item_result` to publish the final item result."
   ].join("\n");
 }
 
@@ -1165,7 +1231,8 @@ function buildManagedWorkListItemNode(options: {
       goal: buildManagedWorkListItemGoal(options),
       acceptance_criteria: [
         ...options.item.acceptance_criteria,
-        "The item result JSON cites concrete evidence and downstream implications.",
+        "The item result JSON cites concrete completion evidence and records risks or downstream implications when any exist.",
+        "Empty risks or downstream_implications arrays are valid when none apply.",
         "The item result JSON matches the current frozen item id and marks completed work only when evidence exists."
       ],
       constraints: [
@@ -1234,7 +1301,8 @@ function buildManagedWorkListItemPhaseNode(options: {
       goal: phaseGoal,
       acceptance_criteria: [
         ...options.item.acceptance_criteria,
-        `The ${options.phase} phase stays scoped to frozen item ${options.item.id}.`
+        `The ${options.phase} phase stays scoped to frozen item ${options.item.id}.`,
+        "Optional risks and downstream implications are truthful; empty arrays are valid when none apply."
       ],
       constraints: [
         ...baseNode.intent.constraints,
@@ -1765,7 +1833,8 @@ async function evaluateManagedWorkListItemCriteria(options: {
             "",
             `Evaluate work-list item ${options.item.id}: ${options.item.title}.`,
             `Criterion target: ${criterion.target ?? "workspace"}.`,
-            "Grade only the current item evidence and the relevant ledger/prior-item pointers."
+            "Grade only the current item evidence and the relevant ledger/prior-item pointers.",
+            "Product correctness and required evidence gaps are blockers. Optional risks or downstream_implications may be empty when none apply; grade truthfulness and usefulness, not non-empty optional fields."
           ].join("\n"),
           node_acceptance_criteria: options.item.acceptance_criteria,
           node_constraints: options.itemNode.intent.constraints,
@@ -1780,6 +1849,23 @@ async function evaluateManagedWorkListItemCriteria(options: {
           timeout_sec: options.itemNode.effective_policy.timeout_sec,
           signal: options.context.signal
         });
+        const criterionFailureCode = aiResult.evaluation.failure_code ??
+          (typeof aiResult.harness_result.metadata?.failure_code === "string"
+            ? aiResult.harness_result.metadata.failure_code
+            : undefined);
+        if (criterionFailureCode === "verification_substrate_failure") {
+          const message = aiResult.evaluation.summary ??
+            `Managed criterion ${criterion.id} failed before producing a trusted verdict.`;
+          await writeFile(join(criterionDir, "verification.json"), `${JSON.stringify({
+            passed: false,
+            score: 0,
+            summary: message,
+            issues: aiResult.evaluation.issues ?? [message],
+            failure_code: "verification_substrate_failure",
+            raw: aiResult.evaluation.raw
+          }, null, 2)}\n`, "utf8");
+          throw new RuntimeFailureError("verification_substrate_failure", message);
+        }
         const score = typeof aiResult.evaluation.score === "number"
           ? Math.max(0, Math.min(1, aiResult.evaluation.score))
           : aiResult.evaluation.passed ? 1 : 0;

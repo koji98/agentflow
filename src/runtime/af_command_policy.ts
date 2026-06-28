@@ -40,10 +40,6 @@ export function decideAfCommand(
     return { allowed: true };
   }
 
-  if (argv.includes("--help")) {
-    return { allowed: true };
-  }
-
   if (argv[0] === "_helper-run") {
     return {
       allowed: false,

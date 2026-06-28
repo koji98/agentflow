@@ -1,3 +1,5 @@
+import type { RuntimeFailureCode } from "../failure.js";
+
 export const outcomeVerificationFindingSeverities = ["blocker", "high", "medium", "low"] as const;
 export type OutcomeVerificationFindingSeverity = (typeof outcomeVerificationFindingSeverities)[number];
 
@@ -22,6 +24,7 @@ export interface OutcomeVerificationVerifierMetadata {
   parse_status: "ok" | "recovered" | "unparseable";
   parse_error?: string;
   raw_response_excerpt?: string;
+  failure_code?: RuntimeFailureCode;
 }
 
 export interface OutcomeVerificationResult {

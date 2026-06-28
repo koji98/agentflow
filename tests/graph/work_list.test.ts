@@ -130,6 +130,7 @@ describe("pattern work list", () => {
     expect(planNode.artifacts).not.toHaveProperty("work_list_md");
     expect(planPrompt).toContain("runtime will freeze this list before execution");
     expect(planPrompt).toContain("Do not run or log implementation validation as blocked during planning");
+    expect(planPrompt).toContain("Use `af artifact write work_list_json` to publish the work list JSON.");
     expect(planPrompt).toContain("Use sequential ids starting at `w1`");
     expect(planPrompt).toContain("planning_summary");
     expect(planPrompt).toContain("ordering_rationale");
@@ -331,6 +332,8 @@ describe("pattern work list", () => {
       }
     }));
     expect(JSON.stringify(publishNode)).toContain("Write only user-authored final artifacts");
+    expect(JSON.stringify(publishNode)).toContain("Use `af artifact write summary` to publish this final artifact.");
+    expect(JSON.stringify(publishNode)).not.toContain("Declared Artifacts table shows the exact command");
   });
 
   it("carries deep_work item phase overrides in the managed runtime config", () => {

@@ -70,11 +70,11 @@ describe("harness prompt rendering", () => {
     expect(prompt.length).toBeLessThan(2600);
     expect(prompt).toContain("## Operating Brief");
     expect(prompt).toContain("Run `af orient` before material work and whenever the goal, context, artifact expectations, retry state, or next action becomes unclear; rerun after compaction");
-    expect(prompt).toContain("Use `af --help` when needed.");
+    expect(prompt).toContain("Use `af --help` when needed; prefer exact task commands before fallbacks.");
     expect(prompt).toContain("Before final response, run `af complete check`");
     expect(prompt).toContain("if incomplete, repair and rerun it until ready or truly blocked");
     expect(prompt).toContain("Do not paste raw/stale check JSON into deliverables");
-    expect(prompt).toContain("Declared names/descriptions are binding");
+    expect(prompt).toContain("Names/descriptions are binding");
     expect(prompt).toContain("`handoff`");
     expect(prompt).not.toContain("## Agentflow Runtime CLI");
     expect(prompt).not.toContain("## Completion Gate");
@@ -174,13 +174,13 @@ describe("harness prompt rendering", () => {
     }));
 
     expect(prompt).toContain("## Declared Artifacts");
-    expect(prompt).toContain("Write stdin with `af artifact write <name>`");
-    expect(prompt).toContain("existing files/binaries with `af artifact write <name> --file <path>`");
+    expect(prompt).toContain("Use each table command; append `--file <path>` for existing files/binaries.");
     expect(prompt).not.toContain("include that exact wording in the artifact instead of only paraphrasing it");
     expect(prompt).not.toContain("include those exact labels with punctuation in the artifact text");
     expect(prompt).not.toContain("asks for named sections without exact label text");
     expect(prompt).not.toContain("Do not write stale completion language");
-    expect(prompt).toContain("| `handoff` | auto-detect | Handoff with literal Scenario:, Validation:, and Risks: fields. |");
+    expect(prompt).toContain("| Name | Write Command | Type | Description |");
+    expect(prompt).toContain("| `handoff` | `af artifact write handoff` | auto-detect | Handoff with literal Scenario:, Validation:, and Risks: fields. |");
     expect(prompt).not.toContain("| `handoff` | `/tmp/run/output/handoff.md` |");
     expect(prompt).not.toContain("If the node task, authored goal, acceptance criteria, or artifact description names required labels");
     expect(prompt).not.toContain("Do not use `/tmp`");
@@ -202,7 +202,7 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain('quote command evidence as one `--command "..."` value');
     expect(prompt).toContain("use existing milestones for late evidence");
     expect(prompt).toContain("Publish declared artifacts with `af artifact write <name>`");
-    expect(prompt).toContain("Attempt exact commands named by the task before fallbacks.");
+    expect(prompt).toContain("prefer exact task commands before fallbacks");
     expect(prompt).toContain("af complete check");
     expect(prompt).toContain("if incomplete, repair and rerun it until ready or truly blocked");
     expect(prompt).toContain("rerun it until ready or truly blocked");
@@ -331,7 +331,8 @@ describe("harness prompt rendering", () => {
 	    expect(prompt).not.toContain("expected absolute path");
 	    expect(prompt).not.toContain("/tmp/run/output/handoff.md");
 	    expect(prompt).toContain("create a repair milestone");
-	    expect(prompt).toContain("publish each missing artifact with `af artifact write <name>`");
+	    expect(prompt).toContain("publish each missing artifact with the exact command listed above");
+	    expect(prompt).toContain("`af artifact write handoff`");
 	    expect(prompt).not.toContain("human-debug");
 	    expect(prompt).not.toContain("stdout.log");
 	    expect(prompt).not.toContain("stderr.log");

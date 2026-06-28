@@ -165,7 +165,9 @@ describe("pattern deep work", () => {
         expect(planPrompt).toContain("Plan the work needed to satisfy the full task from the current state.");
         expect(planPrompt).toContain("Use prior feedback, scorecards, and failed criteria as gap evidence; do not shrink the task to only the last failed check.");
         expect(planPrompt).toContain("Preserve exact task-specific names, labels, commands, and required phrases from the task contract in the plan.");
-        expect(planPrompt).toContain("Write it to `plan.md` as an executor handoff, not as the final deliverable.");
+        expect(planPrompt).toContain("Use `af artifact write plan` to publish the plan content.");
+        expect(planPrompt).toContain("Do not create or edit workspace files during this planning phase.");
+        expect(planPrompt).not.toContain("Write it to `plan.md` as an executor handoff, not as the final deliverable.");
         expect(planPrompt).not.toContain("smallest credible next plan");
         expect(planPrompt).not.toContain("cycle_plan");
         expect(planPrompt).not.toContain("cycle-plan.md");
@@ -198,6 +200,8 @@ describe("pattern deep work", () => {
         expect(generateValidatePrompt).not.toContain("round money with integer cents or Number.EPSILON");
         expect(generateValidatePrompt).toContain("cite concrete evidence names, paths, commands, or packet fields");
         expect(generateValidatePrompt).toContain("Draft final artifacts should include enough evidence citations");
+        expect(generateValidatePrompt).toContain("Use `af artifact write work_notes` to publish the work notes.");
+        expect(generateValidatePrompt).toContain("Use `af artifact write draft_validation_log` to publish the draft for final artifact validation_log.");
         expect(generateValidatePrompt).not.toContain("managed workflow");
         expect(generateValidatePrompt).not.toContain("public artifact");
         expect(generateValidatePrompt).not.toContain("private working material");

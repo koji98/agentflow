@@ -327,6 +327,14 @@ function formatRuntimeCliContract(): string[] {
   ];
 }
 
+function markdownCell(value: string | undefined): string {
+  return (value ?? "").replace(/\r?\n/gu, " ").replace(/\|/gu, "\\|").trim();
+}
+
+function artifactWriteCommand(name: string): string {
+  return `af artifact write ${name}`;
+}
+
 function describeSandbox(sandbox: AgentInvocation["sandbox"]): string {
   switch (sandbox) {
     case "read-only":
@@ -364,12 +372,12 @@ function formatArtifactContract(
 
   return [
     "## Declared Artifacts",
-    "Declared names/descriptions are binding. Write stdin with `af artifact write <name>` or existing files/binaries with `af artifact write <name> --file <path>`.",
+    "Names/descriptions are binding. Use each table command; append `--file <path>` for existing files/binaries.",
     "",
-    "| Name | Type | Description |",
-    "| --- | --- | --- |",
+    "| Name | Write Command | Type | Description |",
+    "| --- | --- | --- | --- |",
     ...entries.map(([name, artifact]) =>
-      `| \`${name}\` | ${artifact.content_type ? `\`${artifact.content_type}\`` : "auto-detect"} | ${artifact.description} |`
+      `| \`${name}\` | \`${artifactWriteCommand(name)}\` | ${artifact.content_type ? `\`${markdownCell(artifact.content_type)}\`` : "auto-detect"} | ${markdownCell(artifact.description)} |`
     )
   ];
 }
@@ -495,7 +503,7 @@ function formatOperatingBrief(invocation: AgentInvocation): string[] {
     "- Preserve API semantics with nullish or explicit checks; avoid truthiness and absence-check ceremony unless null and absence must differ; prefer direct formulas over expanded arithmetic; use helpers/constants only when they clarify; round money with integer cents or Number.EPSILON; make rejection errors name expected formats or valid values.",
     '- Log substantial plans, findings, decisions, and validation with `af milestone add`/`af milestone log`; quote command evidence as one `--command "..."` value; use existing milestones for late evidence.',
     "- Publish declared artifacts with `af artifact write <name>` or `af artifact write <name> --file <path>`.",
-    "- Use `af --help` when needed. Attempt exact commands named by the task before fallbacks.",
+    "- Use `af --help` when needed; prefer exact task commands before fallbacks.",
     "- Before final response, run `af complete check`; if incomplete, repair and rerun it until ready or truly blocked. When ready, stop and respond. Do not paste raw/stale check JSON into deliverables.",
     "- If the same tactic fails twice with the same symptom, change strategy. Stop early only for a concrete blocker and block the active milestone with evidence."
   ];
@@ -754,6 +762,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
         `- \`${artifact.name}\``,
         `  - from: \`${artifact.from}\``,
         `  - declared path: \`${artifact.path}\``,
+        `  - write command: \`${artifactWriteCommand(artifact.name)}\``,
         `  - expected content: ${artifact.description}`
       ]),
       "",
@@ -785,7 +794,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
             "- Do not attempt artifact writes, source edits, or mutating shell commands."
           ]
         : [
-            "- Run `af orient`, create a repair milestone, inspect only evidence needed to repair the missing artifact, publish each missing artifact with `af artifact write <name>`, complete the milestone with evidence, then run `af complete check`.",
+            "- Run `af orient`, create a repair milestone, inspect only evidence needed to repair the missing artifact, publish each missing artifact with the exact command listed above, complete the milestone with evidence, then run `af complete check`.",
             "- If artifact content exists in prior evidence, use it only after checking it still satisfies the current artifact description.",
             "- Finish only after every missing artifact exists and `af complete check` reports ready."
           ])

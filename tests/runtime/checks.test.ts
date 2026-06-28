@@ -95,9 +95,13 @@ describe("runtime checks", () => {
     expect(result.evaluation).toEqual(
       expect.objectContaining({
         passed: false,
-        summary: expect.stringContaining("structured JSON")
+        summary: expect.stringContaining("structured JSON"),
+        failure_code: "verification_substrate_failure"
       })
     );
+    expect(result.harness_result.metadata).toEqual(expect.objectContaining({
+      failure_code: "verification_substrate_failure"
+    }));
   });
 
   it("renders the AI check harness prompt with role, JSON output spec, and inlined manifest", () => {

@@ -2785,7 +2785,12 @@ async function defaultCheckExecutor(
           ...(harness_result.metadata ?? {}),
           failure_code: "verification_substrate_failure" as const
         }
-      : harness_result.metadata ?? {};
+      : evaluation.failure_code
+        ? {
+            ...(harness_result.metadata ?? {}),
+            failure_code: evaluation.failure_code
+          }
+        : harness_result.metadata ?? {};
 
   if (context.node.on_failure === "continue" && harness_result.status === "passed") {
     const verification: VerificationRecordedPayload = {
@@ -2829,21 +2834,21 @@ async function defaultCheckExecutor(
   return {
     status: passed ? "passed" : "failed",
     outcome: passed ? "passed" : "failed",
-	      result: {
-	        exit_code: harness_result.exitCode,
-	        passed,
-	        score: evaluation.score,
-	        summary: evaluation.summary,
-	        issues: evaluation.issues,
-	        raw: evaluation.raw,
-	        metadata: aiCheckFailureMetadata
-	      },
-	      stdout: harness_result.stdout,
-	      stderr: harness_result.stderr,
-	      ...(harness_result.status !== "passed"
-	        ? { metadata: { failure_code: "verification_substrate_failure" as const } }
-	        : {}),
-	      check: {
+    result: {
+      exit_code: harness_result.exitCode,
+      passed,
+      score: evaluation.score,
+      summary: evaluation.summary,
+      issues: evaluation.issues,
+      raw: evaluation.raw,
+      metadata: aiCheckFailureMetadata
+    },
+    stdout: harness_result.stdout,
+    stderr: harness_result.stderr,
+    ...(harness_result.status !== "passed" || evaluation.failure_code
+      ? { metadata: { failure_code: evaluation.failure_code ?? "verification_substrate_failure" as const } }
+      : {}),
+    check: {
       check_kind: "ai",
       passed,
       ...(evaluation.score !== undefined ? { score: evaluation.score } : {}),
@@ -4261,7 +4266,8 @@ async function executeNode(
             truncated_artifacts: [],
             workspace_diff_status: workspaceChangeArtifacts ? workspaceChangeArtifacts.status : "absent",
             parse_status: "unparseable",
-            parse_error: message
+            parse_error: message,
+            failure_code: "verifier_unavailable"
           }
         };
       } else {
@@ -4335,11 +4341,11 @@ async function executeNode(
       );
 
       if (!outcomeVerification.passed) {
-        const verifierFailureCode: RuntimeFailureCode | undefined = outcomeVerification.blockers.some((blocker) =>
-          blocker.category === "verifier_unavailable"
-        )
-          ? "verifier_unavailable"
-          : undefined;
+        const verifierFailureCode: RuntimeFailureCode | undefined =
+          outcomeVerification.verifier_metadata.failure_code ??
+          (outcomeVerification.blockers.some((blocker) => blocker.category === "verifier_unavailable")
+            ? "verifier_unavailable"
+            : undefined);
         const verifierPayload = {
           passed: false,
           summary: outcomeVerification.summary,

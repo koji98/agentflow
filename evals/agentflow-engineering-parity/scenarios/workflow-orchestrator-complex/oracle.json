@@ -1,0 +1,48 @@
+{
+  "validation_commands": [
+    "npm test"
+  ],
+  "required_changed_files": [
+    "src/orchestrator.js",
+    "src/report.js"
+  ],
+  "allowed_changed_globs": [
+    "src/orchestrator.js",
+    "src/report.js"
+  ],
+  "forbidden_changed_globs": [
+    "task.md",
+    "package.json",
+    "test/*.test.js"
+  ],
+  "expected_file_substrings": [
+    {
+      "path": "src/orchestrator.js",
+      "contains": "createWorkflowRunner"
+    },
+    {
+      "path": "src/orchestrator.js",
+      "contains": "skipped_due_to"
+    },
+    {
+      "path": "src/orchestrator.js",
+      "contains": "attempts"
+    },
+    {
+      "path": "src/report.js",
+      "contains": "formatWorkflowReport"
+    },
+    {
+      "path": "src/report.js",
+      "contains": "Workflow status"
+    }
+  ],
+  "quality_anchors": [
+    "Validate duplicate task ids, missing runners, unknown dependencies, and dependency cycles when creating the runner.",
+    "Run each task only after dependencies pass, preserve deterministic dependency order, and record the actual run order.",
+    "Pass each runner a context with original input fields plus successful prior results.",
+    "Retry failed tasks according to the retries budget and record attempts plus a useful error message.",
+    "Skip downstream tasks when a dependency failed or was skipped, with skipped_due_to evidence.",
+    "Format a concise Markdown report from the final workflow result."
+  ]
+}

@@ -13,6 +13,7 @@ import {
   type HarnessResult
 } from "../harness/types.js";
 import { writePromptDiagnostics } from "../harness/prompt_diagnostics.js";
+import type { RuntimeFailureCode } from "../failure.js";
 
 export interface AiCheckResult {
   passed: boolean;
@@ -20,6 +21,7 @@ export interface AiCheckResult {
   summary?: string;
   issues?: unknown[];
   raw?: Record<string, unknown>;
+  failure_code?: RuntimeFailureCode;
 }
 
 export type AiEvaluatorSurface = "ai_check" | "managed_criterion" | "eval_quality_judge";
@@ -122,7 +124,12 @@ function createMalformedResult(message: string, raw?: Record<string, unknown>): 
     passed: false,
     summary: message,
     issues: [message],
-    ...(raw ? { raw } : {})
+    raw: {
+      ...(raw ?? {}),
+      error: message,
+      failure_code: "verification_substrate_failure"
+    },
+    failure_code: "verification_substrate_failure"
   };
 }
 
@@ -132,8 +139,10 @@ function createHarnessFailureResult(message: string): AiCheckResult {
     summary: message,
     issues: [message],
     raw: {
-      error: message
-    }
+      error: message,
+      failure_code: "verification_substrate_failure"
+    },
+    failure_code: "verification_substrate_failure"
   };
 }
 
@@ -422,9 +431,19 @@ export async function runAiCheck(
     harness_result.status !== "passed"
       ? createHarnessFailureResult(summarizeHarnessFailure(harness_result))
       : parsedEvaluation;
+  const finalHarnessResult =
+    harness_result.status === "passed" && evaluation.failure_code
+      ? {
+          ...harness_result,
+          metadata: {
+            ...(harness_result.metadata ?? {}),
+            failure_code: evaluation.failure_code
+          }
+        }
+      : harness_result;
 
   return {
-    harness_result,
+    harness_result: finalHarnessResult,
     evaluation,
     ...(promptSha256 ? { prompt_sha256: promptSha256 } : {})
   };

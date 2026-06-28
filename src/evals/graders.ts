@@ -135,6 +135,7 @@ export async function runScriptCriterion(options: {
   suite_dir: string;
   scenario: EvalScenario;
   variant_id: string;
+  variant_env?: Record<string, string>;
   trial_id: string;
   run_root: string;
   trace_file: string;
@@ -150,6 +151,7 @@ export async function runScriptCriterion(options: {
     args: ["-lc", options.criterion.command ?? ""],
     cwd: options.suite_dir,
     env: {
+      ...(options.variant_env ?? {}),
       AGENTFLOW_EVAL_SCENARIO_ID: options.scenario.id,
       AGENTFLOW_EVAL_VARIANT: options.variant_id,
       AGENTFLOW_EVAL_TRIAL_ID: options.trial_id,

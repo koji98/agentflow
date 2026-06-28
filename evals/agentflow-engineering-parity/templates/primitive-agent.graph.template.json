@@ -26,11 +26,14 @@
   "profiles": {
     "default": {
       "harness": "{{workflow.harness}}",
-      "model": "auto",
+      "model": "{{variant.env.AGENTFLOW_CODEX_MODEL}}",
+      "reasoning_effort": "{{variant.env.AGENTFLOW_CODEX_REASONING_EFFORT}}",
       "sandbox": "workspace-write"
     },
     "supervisor": {
       "harness": "codex-cli",
+      "model": "{{variant.env.AGENTFLOW_CODEX_MODEL}}",
+      "reasoning_effort": "{{variant.env.AGENTFLOW_CODEX_REASONING_EFFORT}}",
       "sandbox": "read-only"
     }
   },

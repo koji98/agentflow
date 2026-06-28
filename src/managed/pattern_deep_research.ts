@@ -48,7 +48,7 @@ function formatList(title: string, values: string[] | undefined, fallback: strin
 
 function formatArtifactContract(artifacts: Record<string, ArtifactDefinition>): string[] {
   return Object.entries(artifacts).flatMap(([name, artifact]) => [
-    `- ${name}: publish this declared artifact; the Declared Artifacts table shows the exact command.`,
+    `- ${name}: Use \`af artifact write ${name}\` to publish this final artifact.`,
     `  ${artifact.description}`
   ]);
 }
@@ -149,7 +149,8 @@ function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepR
       "Do not change the research goal, repo authority, sandbox, or declared artifacts."
     ]),
     section("Output Contract", [
-      `Publish the \`angle_report_${zeroPad(index + 1)}\` artifact; the Declared Artifacts table shows the exact command.`,
+      `Publish the \`angle_report_${zeroPad(index + 1)}\` artifact.`,
+      `Use \`af artifact write angle_report_${zeroPad(index + 1)}\` to publish this angle report.`,
       "This report is research evidence for later synthesis, not the final research handoff.",
       "Do not create a report file in the repo workspace; stream the final Markdown directly to `af artifact write`.",
       "Do not create links to other angle reports; you may reference related findings in prose.",
@@ -197,7 +198,8 @@ function buildSynthesisPrompt(
       "Do not reduce the synthesis to a thin summary. Preserve enough detail for the final publisher to write the complete research artifact without reopening every input report."
     ]),
     section("Output Contract", [
-      `Publish the \`synthesis_report_${zeroPad(layer)}_${zeroPad(group)}\` artifact; the Declared Artifacts table shows the exact command.`,
+      `Publish the \`synthesis_report_${zeroPad(layer)}_${zeroPad(group)}\` artifact.`,
+      `Use \`af artifact write synthesis_report_${zeroPad(layer)}_${zeroPad(group)}\` to publish this synthesis report.`,
       "This synthesis report is research evidence for the final publisher, not the final research handoff.",
       "Include findings, evidence, sources, conflicts, uncertainty, confidence, and collapsed duplicates in Markdown."
     ])
@@ -227,7 +229,8 @@ function buildFinalPrompt(
       "Collapse redundancy, but keep all major findings and the strongest provenance for each claim."
     ]),
     section("Research Artifact Shape", [
-      "Write `research.md` as the only final file and canonical research handoff, not a high-level abstract.",
+      "Publish the `research` artifact as the canonical research handoff, not a high-level abstract.",
+      "Do not create a report file in the repo workspace; stream the final Markdown directly to `af artifact write research`.",
       "Write a holistic, sufficiently detailed, conflict-resolved answer that covers every angle. Do not merely copy raw reports through.",
       "Include all information needed by downstream planning, implementation, review, or decision nodes inside this one file.",
       "End with the integrated conclusion, controlling decisions, unresolved uncertainty, risks, and downstream implications.",

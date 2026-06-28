@@ -126,6 +126,7 @@ describe("deep research managed pattern", () => {
         expect(anglePrompt).toContain("The assigned angle id is angle_01.");
         expect(anglePrompt).toContain("This attempt runs in a disposable investigation workspace.");
         expect(anglePrompt).toContain("Temporary exploratory edits are allowed only when they materially help the investigation.");
+        expect(anglePrompt).toContain("Use `af artifact write angle_report_01` to publish this angle report.");
         expect(anglePrompt).toContain("Do not create a report file in the repo workspace");
         expect(anglePrompt).toContain("Cite original source evidence such as repository paths, commands, URLs, documents, or observed outputs");
         expect(anglePrompt).toContain("do not cite internal angle or synthesis report artifacts as the source for a claim");
@@ -189,6 +190,7 @@ describe("deep research managed pattern", () => {
         expect(JSON.stringify(synthesisLayer.steps[0])).toContain("Produce a complete synthesis for the assigned input reports");
         expect(JSON.stringify(synthesisLayer.steps[0])).toContain("preserve original source paths, commands, URLs, documents, or observed outputs instead of citing the input report itself");
         expect(JSON.stringify(synthesisLayer.steps[0])).toContain("Resolve conflicts inside this synthesis when the input evidence is sufficient");
+        expect(JSON.stringify(synthesisLayer.steps[0])).toContain("Use `af artifact write synthesis_report_01_01` to publish this synthesis report.");
         expect(JSON.stringify(synthesisLayer.steps[0])).toContain("Assigned Input Set");
         expect(JSON.stringify(synthesisLayer.steps[0])).toContain("angle_01: Investigate the local architecture");
         expect(JSON.stringify(synthesisLayer.steps[0])).toContain("angle_02: Compare managed pattern behavior");
@@ -255,7 +257,10 @@ describe("deep research managed pattern", () => {
         const finalPrompt = JSON.stringify(finalNode.managed_prompt);
         expect(finalNode.intent.goal).toContain("Publish research.md as the complete source-cited, conflict-resolved research artifact.");
         expect(finalNode.intent.goal).not.toContain("Write `research.md` as the only final file");
-        expect(finalPrompt).toContain("Write `research.md` as the only final file");
+        expect(finalPrompt).toContain("Use `af artifact write research` to publish this final artifact.");
+        expect(finalPrompt).toContain("Publish the `research` artifact as the canonical research handoff");
+        expect(finalPrompt).toContain("stream the final Markdown directly to `af artifact write research`");
+        expect(finalPrompt).not.toContain("Write `research.md` as the only final file");
         expect(finalPrompt).toContain("Include all information needed by downstream planning, implementation, review, or decision nodes inside this one file");
         expect(finalPrompt).toContain("Do not create angle-specific final artifacts, evidence-link tables, packets, or companion files");
         expect(finalPrompt).not.toContain("Evidence Link Ownership");
@@ -286,6 +291,7 @@ describe("deep research managed pattern", () => {
         expect(finalPrompt).not.toContain("Context Pointer Name");
         expect(finalPrompt).not.toContain("Synthesis Report |");
         expect(finalPrompt).not.toContain("Runtime-Forwarded Raw Angle Artifacts");
+        expect(finalPrompt).not.toContain("Declared Artifacts table shows the exact command");
     });
     it("compiles pattern_deep_research so downstream nodes depend on the final public artifacts", () => {
         const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults({
