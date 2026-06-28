@@ -153,7 +153,7 @@ function buildRunnerPrompt(config: PatternWorkListConfig) {
     ? [
         "Worker kind: agent.",
         "The runtime will launch one item worker per frozen item.",
-        "Each item worker uses the standard Agentflow work loop: orient, create milestones, attach evidence, validate, write one structured item result, and complete."
+        "Each item worker uses the standard runtime work loop: orient, create milestones, attach evidence, validate, write one structured item result, and complete."
       ]
     : [
         "Worker kind: deep_work.",

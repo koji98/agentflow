@@ -37,7 +37,7 @@ Options:
   --once     Poll once and exit. Default: false
   --help     Show this help and exit. Default: false
 
-Agentflow configured defaults:
+Runtime configured defaults:
   (none)
 
 Output:

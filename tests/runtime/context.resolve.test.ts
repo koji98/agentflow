@@ -1062,7 +1062,7 @@ describe("context resolution", () => {
         const pointerContents = await readFile(resolved.packet.materials[0]!.pointer_path, "utf8");
         const summary = await readFile(resolved.manifest_path, "utf8");
         expect(pointerContents).toContain("Line three should remain available because context is pointer-only.");
-        expect(summary).toContain("Agentflow does not copy or truncate source context");
+        expect(summary).toContain("The runtime does not copy or truncate source context");
         expect(summary).not.toContain("Truncated");
         expect(summary).not.toContain("provenance");
         await expect(readdir(executionDir)).resolves.not.toContain("context");

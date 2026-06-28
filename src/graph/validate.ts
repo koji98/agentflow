@@ -403,7 +403,7 @@ function validateToolDeclarations(
     if ((reservedToolNames as readonly string[]).includes(callable)) {
       diagnostics.push({
         path: declarationPath,
-        message: `Plugin tool callable name "${callable}" is reserved for Agentflow runtime commands.`
+        message: `Plugin tool callable name "${callable}" is reserved for task runtime commands.`
       });
       return;
     }

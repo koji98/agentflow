@@ -319,7 +319,7 @@ async function withFileLock<T>(lockPath: string, operation: () => Promise<T>): P
         throw error;
       }
       if (Date.now() - startedAt > 30_000) {
-        throw new Error(`Timed out waiting for Agentflow runtime state lock at ${lockPath}.`);
+        throw new Error(`Timed out waiting for task runtime state lock at ${lockPath}.`);
       }
       await sleep(25);
     }
@@ -464,7 +464,7 @@ function renderMilestoneNextActions(milestones: RuntimeMilestone[]): string[] {
 function requireRuntimeMetadata(): RuntimeMetadata {
   const metadataPath = process.env.AGENTFLOW_RUNTIME_METADATA;
   if (!metadataPath) {
-    throw new Error("af must run inside an Agentflow agent node with AGENTFLOW_RUNTIME_METADATA set.");
+    throw new Error("af must run inside a task runtime node with AGENTFLOW_RUNTIME_METADATA set.");
   }
 
   return JSON.parse(readFileSync(metadataPath, "utf8")) as RuntimeMetadata;
@@ -621,10 +621,10 @@ function pathIsInside(parent: string, candidate: string): boolean {
 
 function renderHelp(): string {
   return [
-    "Agentflow runtime CLI (`af`)",
+    "Task runtime CLI (`af`)",
     "",
     "Purpose:",
-    "  Runtime broker for Agentflow agents. Use it to orient to the node contract, track milestone evidence, publish artifacts, and check completion.",
+    "  Use it to orient to the node contract, track milestone evidence, publish artifacts, and check completion.",
     "",
     "Usage:",
     "  af <command> [subcommand] [options]",
@@ -657,7 +657,7 @@ function renderHelp(): string {
     "  af complete check",
     "",
     "Safety:",
-    "  `af` acts only inside the current Agentflow runtime metadata and node sandbox."
+    "  `af` acts only inside the current task runtime metadata and node sandbox."
   ].join("\n");
 }
 
@@ -734,7 +734,7 @@ function commandHelp(commandPath: string): string | undefined {
       "  EOF",
       "",
       "Safety:",
-      "  Reads bytes from stdin or --file and writes only to the declared artifact destination enforced by Agentflow."
+      "  Reads bytes from stdin or --file and writes only to the declared artifact destination enforced by the task runtime."
     ],
     "complete check": [
       "af complete check - report whether the current attempt is mechanically ready for outcome verification.",
@@ -1190,7 +1190,7 @@ async function commandOrient(metadata: RuntimeMetadata): Promise<AfResult> {
     return {
       exitCode: 0,
       stdout: [
-        "# Agentflow Orientation",
+        "# Task Orientation",
         "",
         `Orientation mode: \`${orientationMode}\``,
         "",
@@ -1202,7 +1202,7 @@ async function commandOrient(metadata: RuntimeMetadata): Promise<AfResult> {
   }
   const milestoneNextActions = renderMilestoneNextActions(milestoneState.milestones);
   const lines = [
-    "# Agentflow Orientation",
+    "# Task Orientation",
     "",
     `Orientation mode: \`${orientationMode}\``,
     "",
@@ -2268,7 +2268,7 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
 
   const prompt = [
     "## Role",
-    "Agentflow is a local graph runner for long-running engineering work.",
+    "You are a helper working inside one graph node's runtime context.",
     ...helperRoleInstructions(session),
     "",
     "## Contract Priority",
@@ -2314,7 +2314,7 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
     "",
     contextManifest || "_No agent context brief was available._",
     "",
-    "## Agentflow Runtime CLI",
+    "## Task Runtime CLI",
     "- Use `af orient` to inspect this helper session.",
     "- Understand the helper task and relevant parent context before committing to execution milestones.",
     "- Use `af milestone add`, `af milestone log`, and `af milestone complete` to track macro progress with evidence.",
@@ -2400,7 +2400,7 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
   });
   const helperMetadataPath = helperToolSetup.env.AGENTFLOW_RUNTIME_METADATA;
   if (!helperMetadataPath) {
-    throw new Error("Failed to prepare Agentflow runtime metadata for helper.");
+    throw new Error("Failed to prepare task runtime metadata for helper.");
   }
   const helperInvocation = {
     toolBinDir: helperToolSetup.bin_dir,
@@ -2559,7 +2559,7 @@ export async function executeAfCli(argv: string[]): Promise<AfResult> {
         stdout: `${JSON.stringify({
           command: "af",
           status: "failed",
-          message: "_helper-run is internal Agentflow runtime transport."
+          message: "_helper-run is internal task runtime transport."
         }, null, 2)}\n`
       };
     }
@@ -2669,7 +2669,7 @@ async function runAfViaBroker(argv: string[]): Promise<number> {
   const output = {
     command: "af",
     status: "failed",
-    message: "Agentflow runtime broker did not respond to the af command."
+    message: "Task runtime broker did not respond to the af command."
   };
   process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
   process.exitCode = 1;

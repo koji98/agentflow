@@ -13,7 +13,7 @@ import type { RuntimeEventEnvelope, VerificationRecordedPayload } from "../event
 import type { RuntimeStateSnapshot, WorkspaceChangeArtifacts } from "../session.js";
 import type { SupervisorDecision, SupervisorInterventionRecord } from "../../supervisor/types.js";
 import type { OutcomeVerificationResult } from "../verification/types.js";
-import type { NodeWorkspaceChangeArtifacts } from "../workspace/types.js";
+import type { NodeWorkspaceChangeArtifacts, NodeWorkspaceChangedFile } from "../workspace/types.js";
 import { readOperatorObservations } from "../observations/index.js";
 import type { OperatorObservation } from "../completion/index.js";
 import type { RuntimeMilestone } from "../completion/types.js";
@@ -98,6 +98,7 @@ export interface DeliveryEvidence {
     attempt_index: number;
     iteration_index?: number;
     artifacts: NodeWorkspaceChangeArtifacts;
+    changed_files: NodeWorkspaceChangedFile[];
   }>;
   milestone_states: Array<{
     execution_id: string;
@@ -215,6 +216,37 @@ function readNodeWorkspaceChanges(attempt: RuntimeNodeAttempt): NodeWorkspaceCha
   return value as NodeWorkspaceChangeArtifacts;
 }
 
+async function readNodeWorkspaceChangedFiles(
+  artifacts: NodeWorkspaceChangeArtifacts
+): Promise<NodeWorkspaceChangedFile[]> {
+  const contents = await readTextArtifact(artifacts.changed_files_path);
+  if (!contents) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(contents) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.flatMap((value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return [];
+      }
+      const candidate = value as Record<string, unknown>;
+      return typeof candidate.path === "string" && typeof candidate.change_kind === "string"
+        ? [{
+            path: candidate.path,
+            change_kind: candidate.change_kind as NodeWorkspaceChangedFile["change_kind"]
+          }]
+        : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
 export async function collectDeliveryEvidence(options: {
   graph: CompiledGraph;
   run_root: string;
@@ -326,21 +358,26 @@ export async function collectDeliveryEvidence(options: {
     }];
   });
 
-  const nodeWorkspaceChanges = options.attempts.flatMap((attempt) => {
-    const artifacts = readNodeWorkspaceChanges(attempt);
-    if (!artifacts) {
-      return [];
-    }
+  const nodeWorkspaceChanges = (
+    await Promise.all(
+      options.attempts.map(async (attempt) => {
+        const artifacts = readNodeWorkspaceChanges(attempt);
+        if (!artifacts) {
+          return undefined;
+        }
 
-    return [{
-      authored_id: attempt.authored_id,
-      compiled_id: attempt.compiled_id,
-      execution_id: attempt.execution_id,
-      attempt_index: attempt.attempt_index,
-      ...(attempt.iteration_index !== undefined ? { iteration_index: attempt.iteration_index } : {}),
-      artifacts
-    }];
-  });
+        return {
+          authored_id: attempt.authored_id,
+          compiled_id: attempt.compiled_id,
+          execution_id: attempt.execution_id,
+          attempt_index: attempt.attempt_index,
+          ...(attempt.iteration_index !== undefined ? { iteration_index: attempt.iteration_index } : {}),
+          artifacts,
+          changed_files: await readNodeWorkspaceChangedFiles(artifacts)
+        };
+      })
+    )
+  ).filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
   const milestoneStates = await readMilestoneStates(options.run_root);
 
   return {

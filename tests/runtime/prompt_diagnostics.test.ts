@@ -65,7 +65,7 @@ describe("prompt diagnostics", () => {
   it("summarizes rendered prompts without changing the prompt text", () => {
     const prompt = [
       "## Role",
-      "Executing one Agentflow graph node.",
+      "You are working one graph node as part of a larger mission.",
       "",
       "## Success Contract",
       "Implement the focused node task.",
@@ -167,7 +167,7 @@ describe("prompt diagnostics", () => {
           "| `docs` | `workspace_glob` | `runtime/globs/docs.md` | 2 of 5 | Search selectively. |"
         ].join("\n")
       }),
-      prompt: "## Role\nExecuting one Agentflow graph node.\n",
+      prompt: "## Role\nYou are working one graph node as part of a larger mission.\n",
       renderer: "renderHarnessPrompt"
     });
 
@@ -233,7 +233,7 @@ describe("prompt diagnostics", () => {
   it("writes diagnostics next to the attempt prompt and fails open on write errors", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-prompt-diagnostics-"));
     const promptPath = join(tempRoot, "agent", "prompt.md");
-    const prompt = "## Role\nExecuting one Agentflow graph node.\n";
+    const prompt = "## Role\nYou are working one graph node as part of a larger mission.\n";
 
     try {
       await mkdir(join(tempRoot, "agent"), { recursive: true });

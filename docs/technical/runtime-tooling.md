@@ -156,7 +156,7 @@ sequenceDiagram
 
 The generated launcher has two paths:
 
-- Help path: if args include `--help` or `-h`, it runs the tool without resolving credentials, injects only non-secret config defaults, appends an `Agentflow configured defaults` section, and records a redacted invocation.
+- Help path: if args include `--help` or `-h`, it runs the tool without resolving credentials, injects only non-secret config defaults, appends a `Runtime configured defaults` section, and records a redacted invocation.
 - Invocation path: it reads non-secret config, resolves declared credential scopes, injects `AGENTFLOW_TOOL_<CALLABLE>_<KEY>` and `AGENTFLOW_CREDENTIAL_<SCOPE>_<FIELD>` only into the plugin subprocess, writes paired input/output debug payloads, and appends a redacted ledger entry. Missing required credentials are checked by runtime-owned preflight before the agent runs; launcher credential failures are audit evidence only and cannot create a pause.
 
 The agent sees tool stdout/stderr and exit code. It does not see secret values unless the plugin executable itself prints them, which plugin authors must avoid.

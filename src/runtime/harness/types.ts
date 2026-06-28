@@ -251,7 +251,7 @@ export function formatToolContract(tools: ResolvedTool[] | undefined): string[] 
 
   const lines: string[] = [
     "## Managed Plugin Tools",
-    "These Agentflow-managed plugin CLIs are on PATH. Use a tool only when it directly fits the node task.",
+    "These managed plugin CLIs are on PATH. Use a tool only when it directly fits the node task.",
     "The entries below are selection hints, not full docs; run `<tool> --help` before first use.",
     "",
     "| Callable | Description | Usage |",
@@ -297,7 +297,7 @@ function formatCliContract(cli: CliHint[] | undefined): string[] {
 
   const lines = [
     "## Ambient CLI Hints",
-    "These are normal shell commands available in the environment. They are not Agentflow-managed tools and have no injected config, credentials, wrappers, or invocation ledger.",
+    "These are normal shell commands available in the environment. They are not managed plugin tools and have no injected config, credentials, wrappers, or invocation ledger.",
     "",
     "| Command | Description |",
     "| --- | --- |"
@@ -312,8 +312,8 @@ function formatCliContract(cli: CliHint[] | undefined): string[] {
 
 function formatRuntimeCliContract(): string[] {
   return [
-    "## Agentflow Runtime CLI",
-    "`af` is on PATH. Use this small runtime loop:",
+    "## Task Runtime CLI",
+    "`af` is the task runtime CLI on PATH. Use it to orient, record progress, publish declared artifacts, and check completion readiness.",
     "",
     "| Command | Purpose |",
     "| --- | --- |",
@@ -340,7 +340,7 @@ function describeSandbox(sandbox: AgentInvocation["sandbox"]): string {
     case "read-only":
       return "read only; no workspace or artifact writes.";
     case "workspace-write":
-      return "edit this workspace and publish artifacts through Agentflow; no out-of-scope writes.";
+      return "edit this workspace and publish artifacts through the task runtime; no out-of-scope writes.";
     case "danger-full-access":
       return "full filesystem and command access.";
   }
@@ -357,7 +357,7 @@ function formatArtifactContract(
   if (entries.length === 0) {
     return [
       "## Declared Artifacts",
-      "No declared handoff artifacts. Agentflow still captures your final response as `agent_response`."
+      "No declared handoff artifacts. The runtime still captures your final response as `agent_response`."
     ];
   }
 
@@ -406,6 +406,7 @@ function formatInlineContextManifest(manifest: string | undefined): string {
     .split(/\r?\n/u)
     .filter((line) =>
       line.trim() !== "# Context Manifest" &&
+      line.trim() !== "Context entries are pointers. The runtime does not copy or truncate source context into this prompt package." &&
       line.trim() !== "Context entries are pointers. Agentflow does not copy or truncate source context into this prompt package."
     );
 
@@ -494,13 +495,12 @@ function formatOperatingBrief(invocation: AgentInvocation): string[] {
   const hasSupervisorRecoveryEnvelope = Boolean(invocation.supervisorRecoveryEnvelope);
   return [
     "## Operating Brief",
-    "Run `af orient` before material work and whenever the goal, context, artifact expectations, retry state, or next action becomes unclear; rerun after compaction, a long pause, or drift.",
+    "`af` is the task runtime CLI. Run `af orient` before material work and whenever the goal, context, artifact expectations, retry state, or next action becomes unclear; rerun after compaction, a long pause, or drift.",
     hasSupervisorRecoveryEnvelope
       ? "This is a retry; detailed recovery orientation, preserve/discard guidance, and validation focus live in `af orient`."
       : "- Plan narrowly; substantial planning belongs in a milestone.",
     "- Satisfy the task contract, not only the visible tests; handle edge cases directly implied by the goal, acceptance criteria, and local code.",
     "- Keep edits scoped; add/edit tests only when the task asks or repo contract expects them.",
-    "- Preserve API semantics with nullish or explicit checks; avoid truthiness and absence-check ceremony unless null and absence must differ; prefer direct formulas over expanded arithmetic; use helpers/constants only when they clarify; round money with integer cents or Number.EPSILON; make rejection errors name expected formats or valid values.",
     '- Log substantial plans, findings, decisions, and validation with `af milestone add`/`af milestone log`; quote command evidence as one `--command "..."` value; use existing milestones for late evidence.',
     "- Publish declared artifacts with `af artifact write <name>` or `af artifact write <name> --file <path>`.",
     "- Use `af --help` when needed; prefer exact task commands before fallbacks.",
@@ -670,7 +670,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
 
     return [
       "## Role",
-      "Agentflow supervisor diagnostic/audit helper.",
+      "You are a supervisor diagnostic/audit helper.",
       "Gather read-only evidence for a failed node attempt. Do not change graph intent, acceptance criteria, repo authority, sandbox authority, or declared artifacts.",
       "You may inspect audit/debug evidence because this is a diagnostic helper prompt, not normal worker context.",
       "Your output feeds a retry plan, so prefer concrete, source-backed guidance over generic advice.",
@@ -708,8 +708,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
 
     return [
       "## Role",
-      "Agentflow is a local graph runner for long-running engineering work.",
-      "You are an AI evaluator executing one read-only check node in a wider Agentflow graph.",
+      "You are an AI evaluator executing one read-only check node in a wider graph.",
       "Evaluate the check task below. Never modify the workspace. Your only output is structured JSON describing your judgment.",
       "",
       ...formatAiEvaluatorTarget(invocation),
@@ -742,9 +741,8 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
 
     return [
       "## Role",
-      "Agentflow is a local graph runner for long-running engineering work.",
-      "You are repairing one previously executed Agentflow node. Do not redo unrelated work.",
-      "Your only job is to produce the missing declared artifacts through Agentflow.",
+      "You are repairing one previously executed graph node. Do not redo unrelated work.",
+      "Your only job is to produce the missing declared artifacts through the task runtime.",
       "",
       ...formatNodeTask(invocation, {
         title: "Repair Task",
@@ -813,11 +811,11 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
 
   return [
     "## Role",
-    "Executing one Agentflow graph node.",
+    "You are working one graph node as part of a larger mission.",
     hasSupervisorRecoveryEnvelope
       ? "The node task still controls; use the supervisor recovery case without changing the contract."
-      : "The node success contract controls; graph/context pointers are evidence, not scope expansion.",
-    "Agentflow is runner, not work target.",
+      : "The node success contract controls; graph context explains the larger mission and is not permission to expand scope.",
+    "The runner and CLI support your work; they are not the work target.",
     "",
     ...nodeTask,
     "",

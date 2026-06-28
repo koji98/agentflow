@@ -1471,8 +1471,8 @@ function buildRuntimeOverlay(options: {
     environmentRepair = {
       reason: options.classification.summary,
       safe_repairs: [
-        "Regenerate per-execution Agentflow tool wrappers.",
-        "Refresh runtime PATH and Agentflow metadata for the next attempt.",
+        "Regenerate per-execution runtime tool wrappers.",
+        "Refresh runtime PATH and metadata for the next attempt.",
         "Validate local runtime/tool availability through the normal executor setup path."
       ],
       retry_effect: "The next attempt receives freshly generated wrappers and runtime metadata without changing graph authority."
@@ -1665,7 +1665,7 @@ function buildRetryDirective(options: {
     : [];
   const environmentGuidance = options.runtimeOverlay?.environment_repair
     ? [
-        "Use the refreshed Agentflow runtime wrappers and PATH metadata from this retry.",
+        "Use the refreshed runtime wrappers and PATH metadata from this retry.",
         "If a local tool is still unavailable, capture exact command evidence before final handoff."
       ]
     : [];

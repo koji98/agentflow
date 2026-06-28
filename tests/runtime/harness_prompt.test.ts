@@ -119,11 +119,78 @@ describe("harness prompt rendering", () => {
       graphConstraints: ["Stay within the repo."]
     }));
 
-    expect(prompt).toContain("Executing one Agentflow graph node.");
+    expect(prompt).toContain("You are working one graph node as part of a larger mission.");
     expect(prompt.indexOf("## Success Contract")).toBeLessThan(prompt.indexOf("## Graph Context"));
     expect(prompt).toContain("The node success contract controls");
+    expect(prompt).toContain("graph context explains the larger mission");
     expect(prompt).toContain("## Graph Context");
     expect(prompt).not.toContain("## Diagnostics");
+  });
+
+  it("frames workers as scoped graph-node collaborators without runtime product branding", () => {
+    const prompt = renderHarnessPrompt(baseInvocation({
+      graphGoal: "Ship the wider feature safely.",
+      graphAcceptanceCriteria: ["The full workflow validates."]
+    }));
+
+    expect(prompt).toContain("one graph node");
+    expect(prompt).toContain("larger mission");
+    expect(prompt).toContain("The node success contract controls");
+    expect(prompt).toContain("graph context explains the larger mission");
+    expect(prompt).toContain("The runner and CLI support your work; they are not the work target.");
+    expect(prompt).not.toContain("Agentflow");
+    expect(prompt).not.toContain("round money");
+    expect(prompt).not.toContain("Preserve API semantics with nullish or explicit checks");
+  });
+
+  it("uses neutral runtime CLI wording on non-worker model-facing prompt kinds", () => {
+    const aiCheckPrompt = renderHarnessPrompt(baseInvocation({
+      promptKind: "ai_check",
+      sandbox: "read-only",
+      artifacts: {}
+    }));
+    expect(aiCheckPrompt).toContain("one read-only check node in a wider graph");
+    expect(aiCheckPrompt).not.toContain("Agentflow");
+
+    const repairPrompt = renderHarnessPrompt(baseInvocation({
+      promptKind: "artifact_repair",
+      artifacts: {
+        handoff: {
+          from: "output_dir",
+          path: "handoff.md",
+          description: "Markdown handoff."
+        }
+      },
+      repair: {
+        repairAttempt: 1,
+        maxAttempts: 2,
+        repairBriefPath: "/tmp/run/agent/artifact-repair.md",
+        priorResponsePath: "/tmp/run/output/agent-response.md",
+        previousAttemptEvidencePaths: [],
+        missingArtifacts: [{
+          name: "handoff",
+          from: "output_dir",
+          path: "handoff.md",
+          description: "Markdown handoff.",
+          expectedPath: "/tmp/run/output/handoff.md"
+        }]
+      }
+    }));
+    expect(repairPrompt).toContain("## Task Runtime CLI");
+    expect(repairPrompt).not.toContain("Agentflow");
+
+    const supervisorPrompt = renderHarnessPrompt(baseInvocation({
+      promptKind: "supervisor_evidence",
+      sandbox: "read-only",
+      supervisorEvidence: {
+        gatherKind: "local_context",
+        caseFilePath: "/tmp/run/runtime/supervisor/case-file.json",
+        evidencePatchPath: "/tmp/run/human-debug/interventions/evidence-patch.json",
+        instructions: ["Inspect the failed attempt evidence."]
+      }
+    }));
+    expect(supervisorPrompt).toContain("diagnostic/audit helper");
+    expect(supervisorPrompt).not.toContain("Agentflow");
   });
 
   it("keeps context agent-facing and omits runtime/debug metadata", () => {
@@ -196,8 +263,8 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain("Plan narrowly; substantial planning belongs in a milestone.");
     expect(prompt).toContain("Satisfy the task contract, not only the visible tests");
     expect(prompt).toContain("add/edit tests only when the task asks or repo contract expects them");
-    expect(prompt).toContain("Preserve API semantics with nullish or explicit checks");
-    expect(prompt).toContain("round money with integer cents or Number.EPSILON");
+    expect(prompt).not.toContain("Preserve API semantics with nullish or explicit checks");
+    expect(prompt).not.toContain("round money with integer cents or Number.EPSILON");
     expect(prompt).toContain("Log substantial plans, findings, decisions, and validation with `af milestone add`/`af milestone log`");
     expect(prompt).toContain('quote command evidence as one `--command "..."` value');
     expect(prompt).toContain("use existing milestones for late evidence");
@@ -211,8 +278,8 @@ describe("harness prompt rendering", () => {
     expect(prompt).not.toContain("af log --type");
     expect(prompt).not.toContain("Every `af log --evidence` JSON value");
     expect(prompt).toContain("If the same tactic fails twice with the same symptom");
-    expect(prompt).toContain("Agentflow is runner, not work target.");
-    expect(prompt).toContain("graph/context pointers are evidence, not scope expansion.");
+    expect(prompt).toContain("The runner and CLI support your work; they are not the work target.");
+    expect(prompt).toContain("graph context explains the larger mission");
     expect(prompt).not.toContain("ambient skills");
     expect(prompt).not.toContain("Agentflow playbooks");
     expect(prompt).not.toContain("AGENTS.md files outside");

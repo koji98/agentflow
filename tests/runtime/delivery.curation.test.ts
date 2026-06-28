@@ -35,6 +35,7 @@ function sourcePacket(): DeliverySourcePacket {
         final_declared_artifacts: [],
         superseded_declared_artifacts: [],
         changed_files: [],
+        node_changed_files: [],
         validation: {
             milestone_validation_logs: [],
             outcome_verifications: []
@@ -476,6 +477,34 @@ describe("delivery curation prompt", () => {
 
         expect(verdict.findings).not.toEqual(expect.arrayContaining([
             expect.objectContaining({ kind: "invented_validation_pass" })
+        ]));
+    });
+
+    it("rejects claims that targeted validation was a full-suite pass", async () => {
+        const paths = await deliveryPaths();
+        const source = sourcePacket();
+        source.validation.milestone_validation_logs.push({
+            execution_id: "exec-1",
+            milestone_id: "m1",
+            command: "npm test -- tests/unit/checkout.test.ts",
+            result: "pass",
+            summary: "Targeted checkout test passed."
+        });
+
+        const verdict = await verifyCuratedDelivery({
+            source,
+            review_brief_markdown: validReviewBrief({
+                validationEvidence: "- Full test suite passed with `npm test -- tests/unit/checkout.test.ts`."
+            }),
+            run_learnings_markdown: validRunLearnings(),
+            review_brief_path: paths.reviewPath,
+            run_learnings_path: paths.learningsPath,
+            delivery_dir: paths.deliveryDir
+        });
+
+        expect(verdict.passed).toBe(false);
+        expect(verdict.findings).toEqual(expect.arrayContaining([
+            expect.objectContaining({ kind: "overstated_validation_scope" })
         ]));
     });
 });

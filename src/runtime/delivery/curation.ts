@@ -76,6 +76,18 @@ export interface DeliverySourcePacket {
     workspace_path: string;
     files: string[];
   }>;
+  node_changed_files: Array<{
+    node: string;
+    execution_id: string;
+    attempt_path?: string;
+    attempt_relative_path?: string;
+    diff_path: string;
+    changed_files_path: string;
+    files: Array<{
+      path: string;
+      change_kind: "tracked" | "untracked_added" | "untracked_deleted";
+    }>;
+  }>;
   validation: {
     milestone_validation_logs: Array<{
       execution_id: string;
@@ -96,6 +108,7 @@ export interface DeliverySourcePacket {
       findings_count: number;
       blockers_count: number;
       evidence_path: string;
+      verifier_evidence_path?: string;
     }>;
   };
   failures: {
@@ -224,6 +237,30 @@ function lineContainsPassClaimForCommand(line: string, command: string): boolean
   return lineContainsPassClaim(localSuffix);
 }
 
+function lineContainsFullValidationScopeClaim(line: string): boolean {
+  const prose = line.replace(/`[^`]*`/gu, "");
+  return /\b(?:full|entire|complete)\s+(?:test|validation|check)?\s*suite\b/iu.test(prose) ||
+    /\ball\s+(?:tests|checks|validation)\s+(?:pass|passed|passing|succeeded|successful|green)\b/iu.test(prose);
+}
+
+function commandLooksTargeted(command: string): boolean {
+  const withoutEnv = command.replace(/^(?:env\s+)?(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*/u, "").trim();
+  const tokens = withoutEnv.split(/\s+/u).filter(Boolean);
+  return tokens.some((token, index) => {
+    if (token === "--") {
+      return false;
+    }
+    const previous = tokens[index - 1];
+    if (previous && /^--(?:filter|grep|testNamePattern|runTestsByPath|project|workspace)$/u.test(previous)) {
+      return true;
+    }
+    if (token.startsWith("--")) {
+      return false;
+    }
+    return /(?:^|\/)(?:tests?|spec|e2e|__tests__)\/|(?:\.|\/)(?:test|spec|cy|e2e)\.[cm]?[jt]sx?$/iu.test(token);
+  });
+}
+
 function sectionIncludes(section: string, value: string): boolean {
   return section.toLocaleLowerCase().includes(value.toLocaleLowerCase());
 }
@@ -350,10 +387,15 @@ function validateEvidenceClaims(options: {
   const changedSection = sectionBody(options.reviewBrief, "Changed Files");
   const validationSection = sectionBody(options.reviewBrief, "Validation Evidence");
   const knownChangedFiles = new Set(
-    options.source.changed_files.flatMap((entry) => [
-      ...entry.files,
-      ...entry.files.map((file) => `${entry.repo}/${file}`)
-    ])
+    [
+      ...options.source.changed_files.flatMap((entry) => [
+        ...entry.files,
+        ...entry.files.map((file) => `${entry.repo}/${file}`)
+      ]),
+      ...options.source.node_changed_files.flatMap((entry) =>
+        entry.files.map((file) => file.path)
+      )
+    ]
   );
   for (const reference of codeSpans(changedSection)) {
     if (looksLikeFileReference(reference) && !knownChangedFiles.has(reference)) {
@@ -426,6 +468,22 @@ function validateEvidenceClaims(options: {
           kind: "invented_validation_pass",
           message: `Review brief claims validation command "${command}" passed, but the validation ledger does not record a pass result.`
         });
+      }
+    }
+    if (lineContainsFullValidationScopeClaim(line)) {
+      for (const command of new Set(mentionedCommands)) {
+        const commandLogs = logsForValidationReference(command);
+        if (
+          line.includes(command) &&
+          commandLooksTargeted(command) &&
+          commandLogs.some((log) => log.result === "pass")
+        ) {
+          options.findings.push({
+            severity: "blocker",
+            kind: "overstated_validation_scope",
+            message: `Review brief describes targeted validation command "${command}" as full-suite validation.`
+          });
+        }
       }
     }
   }
@@ -606,7 +664,7 @@ export function renderDeliveryCuratorPrompt(input: DeliveryCurationInput): strin
 
   return [
     "## Role",
-    "You are the Agentflow delivery curator. Synthesize the terminal run evidence into a human review package.",
+    "You are the delivery curator. Synthesize the terminal run evidence into a human review package.",
     "You are read-only. Do not edit source workspaces, run commands, request human input, or change run status.",
     "Your job is to make the handoff useful, concise, and evidence-grounded.",
     "",

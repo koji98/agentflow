@@ -308,7 +308,7 @@ describe("codex cli harness", () => {
       expect(argv).not.toContain("plugins={}");
       expect(argv).not.toContain("notify=[]");
       expect(prompt).toContain("## Role");
-      expect(prompt).toContain("Executing one Agentflow graph node.");
+      expect(prompt).toContain("You are working one graph node as part of a larger mission.");
       expect(prompt).toContain("## Success Contract");
       expect(prompt).toContain("Implement the change.");
       expect(prompt.indexOf("## Success Contract")).toBeLessThan(prompt.indexOf("## Graph Context"));

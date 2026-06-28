@@ -486,7 +486,7 @@ process.stdout.write(JSON.stringify({
       );
       expect(argv).not.toContain("--force");
       expect(prompt).toContain("## Role");
-      expect(prompt).toContain("Executing one Agentflow graph node.");
+      expect(prompt).toContain("You are working one graph node as part of a larger mission.");
       expect(prompt).toContain("## Success Contract");
       expect(prompt).toContain("Review the change.");
       expect(prompt).toContain("## Context");
