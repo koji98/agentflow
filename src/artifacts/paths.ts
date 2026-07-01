@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, join, resolve } from "node:path";
 
+import { taskRuntimeDirectoryName } from "../generated_state.js";
+
 export const runsRootEnvironmentVariable = "AGENTFLOW_RUNS_ROOT";
 const maxPathSegmentLength = 120;
 
@@ -172,7 +174,7 @@ export function resolveRunsRoot(options: RunsRootOptions): string {
   }
 
   const baseDirectory = options.graphDirectory ?? options.currentWorkingDirectory;
-  return resolve(baseDirectory, ".agentflow", "runs");
+  return resolve(baseDirectory, taskRuntimeDirectoryName, "runs");
 }
 
 export function createRunRootPath(options: RunRootOptions): string {

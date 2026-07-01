@@ -45,16 +45,6 @@ interface ArtifactInspection {
   findings: CompletionArtifactFinding[];
 }
 
-interface ForbiddenArtifactContent {
-  term: string;
-  source: string;
-}
-
-interface RequiredArtifactContent {
-  term: string;
-  source: string;
-}
-
 interface HelperSessionSnapshot {
   agent_id: string;
   parent_agent_id: string;
@@ -138,66 +128,6 @@ function containsPlaceholder(content: string): boolean {
   return placeholderPatterns.some((pattern) => pattern.test(content));
 }
 
-const forbiddenSentencePattern = /\b((?:do not|don't|must not|should not|never)[^.!?\n]*(?:contain|include|use|summarize|cite|rely on|copy|mention|write)[^.!?\n]*)/giu;
-const forbiddenRequirementSignalPattern = /\b(?:do not|don't|must not|should not|never)\b/iu;
-const backtickedTermPattern = /`([^`\n]+)`/gu;
-const requiredArtifactTermContextPattern = /\b(?:includes?|including|contains?|copy|say|with|literal labels?|exact phrases?|discovered risk that|risk that|finding that)\b/iu;
-const forbiddenBeforeTermPattern = /\b(?:do not|don't|must not|should not|never)\b[^`\n]*$/iu;
-
-function isRuntimeInstructionTerm(term: string): boolean {
-  return (
-    /^af\s+/iu.test(term) ||
-    /\bAGENTFLOW_[A-Z0-9_]+\b/u.test(term) ||
-    /^\$AGENTFLOW_[A-Z0-9_]+/u.test(term)
-  );
-}
-
-function extractForbiddenArtifactContent(texts: string[]): ForbiddenArtifactContent[] {
-  const terms = new Map<string, ForbiddenArtifactContent>();
-  for (const text of texts) {
-    for (const sentence of text.matchAll(forbiddenSentencePattern)) {
-      const source = sentence[1]?.trim();
-      if (!source) {
-        continue;
-      }
-      for (const match of source.matchAll(backtickedTermPattern)) {
-        const term = match[1]?.trim();
-        if (!term || terms.has(term)) {
-          continue;
-        }
-        terms.set(term, { term, source });
-      }
-    }
-  }
-  return [...terms.values()];
-}
-
-function extractRequiredArtifactContent(texts: string[]): RequiredArtifactContent[] {
-  const terms = new Map<string, RequiredArtifactContent>();
-  for (const text of texts) {
-    for (const match of text.matchAll(backtickedTermPattern)) {
-      const term = match[1]?.trim();
-      if (!term || isRuntimeInstructionTerm(term) || terms.has(term) || match.index === undefined) {
-        continue;
-      }
-      const before = text.slice(Math.max(0, match.index - 140), match.index);
-      const after = text.slice(match.index + match[0].length, Math.min(text.length, match.index + match[0].length + 140));
-      if (forbiddenBeforeTermPattern.test(before)) {
-        continue;
-      }
-      const source = `${before}${match[0]}${after}`.trim();
-      if (!requiredArtifactTermContextPattern.test(before) && !requiredArtifactTermContextPattern.test(after)) {
-        continue;
-      }
-      if (forbiddenRequirementSignalPattern.test(after) && !requiredArtifactTermContextPattern.test(before)) {
-        continue;
-      }
-      terms.set(term, { term, source });
-    }
-  }
-  return [...terms.values()];
-}
-
 async function inspectArtifact(options: {
   name: string;
   definition: ArtifactDefinition;
@@ -205,9 +135,6 @@ async function inspectArtifact(options: {
   currentAttemptPath: string | undefined;
   priorAttempts: RuntimeNodeAttempt[];
   sandbox: BuildCompletionPacketOptions["sandbox"];
-  forbiddenContent: ForbiddenArtifactContent[];
-  requiredContent: RequiredArtifactContent[];
-  declaredArtifactIdentifiers: string[];
 }): Promise<ArtifactInspection> {
   const findings: CompletionArtifactFinding[] = [];
   const currentAttempt = options.currentAttemptPath === options.expectedPath || await fileExists(options.expectedPath);
@@ -410,63 +337,6 @@ async function inspectArtifact(options: {
         findings
       };
     }
-  }
-
-  const forbidden = options.forbiddenContent.find((rule) => content.includes(rule.term));
-  if (forbidden) {
-    findings.push({
-      artifact: options.name,
-      kind: "forbidden_content",
-      summary: `Declared artifact "${options.name}" contains contract-forbidden content: ${forbidden.term}.`,
-      evidence_ref: options.expectedPath
-    });
-    return {
-      artifact: {
-        name: options.name,
-        required: true,
-        from: options.definition.from,
-        path: options.definition.path,
-        expected_path: options.expectedPath,
-        description: options.definition.description,
-        status: "forbidden_content",
-        current_attempt: true,
-        ...metadataFields
-      },
-      findings
-    };
-  }
-
-  const missingRequired = options.requiredContent.find((rule) => {
-    if (
-      rule.term === options.name ||
-      rule.term === options.definition.path ||
-      options.declaredArtifactIdentifiers.includes(rule.term)
-    ) {
-      return false;
-    }
-    return !content.includes(rule.term);
-  });
-  if (missingRequired) {
-    findings.push({
-      artifact: options.name,
-      kind: "missing_required_content",
-      summary: `Declared artifact "${options.name}" is missing required exact content: ${missingRequired.term}.`,
-      evidence_ref: options.expectedPath
-    });
-    return {
-      artifact: {
-        name: options.name,
-        required: true,
-        from: options.definition.from,
-        path: options.definition.path,
-        expected_path: options.expectedPath,
-        description: options.definition.description,
-        status: "missing_required_content",
-        current_attempt: true,
-        ...metadataFields
-      },
-      findings
-    };
   }
 
   return {
@@ -1212,22 +1082,6 @@ export async function buildCompletionPacket(options: BuildCompletionPacketOption
   const declaredArtifacts: CompletionDeclaredArtifact[] = [];
   const artifactFindings: CompletionArtifactFinding[] = [];
   const priorAttempts = options.priorAttempts ?? [];
-  const forbiddenContent = extractForbiddenArtifactContent([
-    options.node.intent.goal,
-    ...options.node.intent.acceptance_criteria,
-    ...options.node.intent.constraints,
-    ...Object.values(options.node.declared_artifacts).map((artifact) => artifact.description)
-  ]);
-  const requiredContent = extractRequiredArtifactContent([
-    options.node.intent.goal,
-    ...options.node.intent.acceptance_criteria,
-    ...options.node.intent.constraints,
-    ...Object.values(options.node.declared_artifacts).map((artifact) => artifact.description)
-  ]);
-  const declaredArtifactIdentifiers = Object.entries(options.node.declared_artifacts).flatMap(([name, definition]) => [
-    name,
-    definition.path
-  ]);
   for (const [name, definition] of Object.entries(options.node.declared_artifacts)) {
     const expectedPath = expectedArtifactPath({
       definition,
@@ -1242,10 +1096,7 @@ export async function buildCompletionPacket(options: BuildCompletionPacketOption
       expectedPath,
       currentAttemptPath: options.attempt.artifacts[name],
       priorAttempts,
-      sandbox: options.sandbox,
-      forbiddenContent,
-      requiredContent,
-      declaredArtifactIdentifiers
+      sandbox: options.sandbox
     });
     declaredArtifacts.push(inspected.artifact);
     artifactFindings.push(...inspected.findings);

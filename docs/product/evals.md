@@ -366,10 +366,10 @@ Prompt packs are eval labels, not runtime compatibility modes. Agentflow keeps o
 
 ```bash
 agentflow eval validate evals/agentflow-workflow-quality
-agentflow eval run evals/agentflow-workflow-quality --variant current --scenario all --trials 3 --eval-root .agentflow/evals/workflow-quality --concurrency 4
-agentflow eval report .agentflow/evals/workflow-quality --format markdown
-agentflow eval inspect .agentflow/evals/workflow-quality --scenario missing-dependency-docs --variant current --trial 1
-agentflow eval compare .agentflow/evals/workflow-quality --baseline current --candidate terse
+agentflow eval run evals/agentflow-workflow-quality --variant current --scenario all --trials 3 --eval-root .task-runtime/evals/workflow-quality --concurrency 4
+agentflow eval report .task-runtime/evals/workflow-quality --format markdown
+agentflow eval inspect .task-runtime/evals/workflow-quality --scenario missing-dependency-docs --variant current --trial 1
+agentflow eval compare .task-runtime/evals/workflow-quality --baseline current --candidate terse
 npm run validate:prompts
 ```
 

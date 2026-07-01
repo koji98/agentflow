@@ -612,7 +612,7 @@ async function createRunSmokeFixture(harnessKind, workspaceBackend) {
     tempRoot,
     launchRoot,
     graphPath,
-    runsRoot: join(tempRoot, ".agentflow", "runs"),
+    runsRoot: join(tempRoot, ".task-runtime", "runs"),
     harnessKind,
     workspaceBackend,
     repoDir,

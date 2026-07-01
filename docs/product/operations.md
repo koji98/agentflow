@@ -20,7 +20,7 @@ Agents can run `af --help` and `af <command> --help` inside a node for the autho
 agentflow validate --graph agentflow.graph.json
 agentflow validate --graph agentflow.graph.json --strict
 agentflow validate --graph agentflow.graph.json --show-compiled
-agentflow validate --graph agentflow.graph.json --output-dir .agentflow/validation/latest
+agentflow validate --graph agentflow.graph.json --output-dir .task-runtime/validation/latest
 agentflow validate --graph agentflow.graph.json --diagram-output graph.mmd
 agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg
 agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg --diagram-image-package @mermaid-js/mermaid-cli@latest
@@ -42,7 +42,7 @@ Always inspect `intent`, `supervision`, resolved profiles, managed expansions, p
 agentflow plugin resolve --graph agentflow.graph.json
 ```
 
-Run this after changing plugin `source`, `ref`, local `path`, workflow files, tool manifests, credential metadata, or graph plugin declarations. The command writes `agentflow.plugins.lock.json` next to the graph. Validation and runtime use the lockfile, Git cache, and local-folder digests.
+Run this after changing plugin `source`, `ref`, local `path`, workflow files, tool manifests, credential metadata, or graph plugin declarations. The command writes `task-runtime.plugins.lock.json` next to the graph. Validation and runtime use the lockfile, Git cache, and local-folder digests.
 
 ## Configure Plugin Auth
 
@@ -187,7 +187,7 @@ Choose the smallest evaluation lane that matches the question:
 - Let outcome verification grade passing `agent` attempts against authored acceptance criteria. It writes per-attempt verifier artifacts and routes rejected attempts through supervision.
 - Let supervisor `semantic_evaluation` spend intervention budget when a failed AI check or semantic uncertainty needs runtime recovery evidence.
 - Use managed pattern evaluation when the evaluation loop is part of a reusable authored workflow, such as `pattern_deep_work`.
-- Use `agentflow eval` for offline workflow suites that compare scenarios, variants, and repeated trials with required criteria, quality criteria, trajectory checks, and deterministic environment simulation. It follows Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents), adopts useful ADK eval mechanics, and writes `.agentflow/evals` artifacts, including `eval-run.json`, `evaluation-ledger.json`, trial `trace-packet.json`, `scorecard.json`, `benchmark.json`, and `report.md`; exit status follows infrastructure failures and `benchmark.threshold_passed`.
+- Use `agentflow eval` for offline workflow suites that compare scenarios, variants, and repeated trials with required criteria, quality criteria, trajectory checks, and deterministic environment simulation. It follows Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents), adopts useful ADK eval mechanics, and writes `.task-runtime/evals` artifacts, including `eval-run.json`, `evaluation-ledger.json`, trial `trace-packet.json`, `scorecard.json`, `benchmark.json`, and `report.md`; exit status follows infrastructure failures and `benchmark.threshold_passed`.
 
 ## Run Eval Suites
 
@@ -195,10 +195,10 @@ Use `evals.md` as the canonical eval guide. The operational loop is:
 
 ```bash
 agentflow eval validate evals/agentflow-workflow-quality
-agentflow eval run evals/agentflow-workflow-quality --variant current --scenario all --trials 3 --eval-root .agentflow/evals/workflow-quality --concurrency 4
-agentflow eval report .agentflow/evals/workflow-quality --format markdown
-agentflow eval inspect .agentflow/evals/workflow-quality --scenario missing-dependency-docs --variant current --trial 1
-agentflow eval compare .agentflow/evals/workflow-quality --baseline current --candidate terse
+agentflow eval run evals/agentflow-workflow-quality --variant current --scenario all --trials 3 --eval-root .task-runtime/evals/workflow-quality --concurrency 4
+agentflow eval report .task-runtime/evals/workflow-quality --format markdown
+agentflow eval inspect .task-runtime/evals/workflow-quality --scenario missing-dependency-docs --variant current --trial 1
+agentflow eval compare .task-runtime/evals/workflow-quality --baseline current --candidate terse
 ```
 
 For prompt/context iteration against larger local repo fixtures:
@@ -206,7 +206,7 @@ For prompt/context iteration against larger local repo fixtures:
 ```bash
 npm run setup:eval-repos
 agentflow eval validate evals/agentflow-capability-workflows
-agentflow eval run evals/agentflow-capability-workflows --variant current --scenario all --trials 1 --eval-root .agentflow/evals/capability-workflows --concurrency 2
+agentflow eval run evals/agentflow-capability-workflows --variant current --scenario all --trials 1 --eval-root .task-runtime/evals/capability-workflows --concurrency 2
 ```
 
 Run `validate` before `run`; it catches missing scenario files, graph templates, variant files, criteria, rubrics, scripts, and environment fixtures before any expensive harness work starts.

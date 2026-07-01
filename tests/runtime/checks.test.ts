@@ -53,7 +53,7 @@ describe("runtime checks", () => {
           source_alias: "team",
           name: "evaluator",
           description: "Evaluate evidence strictly.",
-          path: "/tmp/.agentflow/skills/team/sha/evaluator/SKILL.md"
+          path: "/tmp/.task-runtime/skills/team/sha/evaluator/SKILL.md"
         }
       ],
       cli: [
@@ -89,7 +89,7 @@ describe("runtime checks", () => {
     expect(renderedPrompt).toContain("Evaluate the patch.");
     expect(renderedPrompt).toContain("Be strict.");
     expect(renderedPrompt).toContain("## Optional Skills");
-    expect(renderedPrompt).toContain("| evaluator | Evaluate evidence strictly. | `/tmp/.agentflow/skills/team/sha/evaluator/SKILL.md` |");
+    expect(renderedPrompt).toContain("| evaluator | Evaluate evidence strictly. | `/tmp/.task-runtime/skills/team/sha/evaluator/SKILL.md` |");
     expect(renderedPrompt).toContain("## Ambient CLI Hints");
     expect(renderedPrompt).toContain("| `jq` | Inspect structured JSON evidence. |");
     expect(result.evaluation).toEqual(

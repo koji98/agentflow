@@ -6,6 +6,7 @@ import {
   resolveExecutionHumanDebugToolDirectory,
   resolveExecutionRuntimeCompletionPacketPath
 } from "../artifacts/paths.js";
+import { staleAgentflowDirectoryName, taskRuntimeDirectoryName } from "../generated_state.js";
 import {
   readCompiledGraph,
   readExecutionManifest,
@@ -149,7 +150,8 @@ async function readAttemptCompletionPackets(attempts: Array<{
 
 const promptDiagnosticsTraversalSkips = new Set([
   ".git",
-  ".agentflow",
+  taskRuntimeDirectoryName,
+  staleAgentflowDirectoryName,
   "node_modules",
   ".venv",
   "venv",

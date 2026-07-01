@@ -5,6 +5,7 @@ import {
   resolveRunsRoot,
   runsRootEnvironmentVariable
 } from "../artifacts/paths.js";
+import { taskRuntimeDirectoryName } from "../generated_state.js";
 import {
   mergeConfig,
   parseConfigOverridesFromCli,
@@ -17,7 +18,7 @@ export const graphPathRuleText =
 export const repoPathRuleText =
   "Repo paths in $.repos.*.path resolve relative to the graph file directory.";
 export const runsRootContractText =
-  `CLI commands resolve runs roots from an absolute ${runsRootEnvironmentVariable} when set; otherwise they default to <graph-directory>/.agentflow/runs (falling back to <launch-cwd>/.agentflow/runs when the graph directory is unavailable).`;
+  `CLI commands resolve runs roots from an absolute ${runsRootEnvironmentVariable} when set; otherwise they default to <graph-directory>/${taskRuntimeDirectoryName}/runs (falling back to <launch-cwd>/${taskRuntimeDirectoryName}/runs when the graph directory is unavailable).`;
 export const runCancellationText =
   "Press Ctrl-C in the terminal running agentflow run to cancel. The runtime waits for cleanup and durable artifacts capture the terminal Canceled state.";
 
@@ -85,7 +86,7 @@ export function createRunsRootDetails(
     runs_root_env: runsRootEnvironmentVariable,
     runs_root_source: runsRootSource,
     ...(explicitRunsRoot ? { runs_root_input: explicitRunsRoot } : configuredRunsRoot ? { runs_root_input: configuredRunsRoot } : {}),
-    default_runs_root: resolve(defaultBaseDirectory, ".agentflow", "runs"),
+    default_runs_root: resolve(defaultBaseDirectory, taskRuntimeDirectoryName, "runs"),
     contract: runsRootContractText
   };
 }

@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 
 import { runCommand } from "../cli/commands/run.js";
 import { resumeCommand } from "../cli/commands/resume.js";
+import { taskRuntimeDirectoryName } from "../generated_state.js";
 import { resolvePluginsForGraph } from "../plugins/workflows.js";
 import { resolveSkillSourcesForGraph } from "../skills/sources.js";
 import type {
@@ -82,7 +83,7 @@ export function createEvalRootPath(options: {
 
   return resolve(
     options.currentWorkingDirectory,
-    ".agentflow",
+    taskRuntimeDirectoryName,
     "evals",
     `${timestamp}-${suiteSegment}${labelSegment}`
   );
@@ -312,7 +313,7 @@ async function createSimulationProxies(options: {
   }
 
   const binPath = join(options.trial_root, "simulation-bin");
-  const eventsFile = join(options.trial_root, "workspace", "repo", ".agentflow-simulation-events.jsonl");
+  const eventsFile = join(options.trial_root, "workspace", "repo", ".task-runtime-simulation-events.jsonl");
   await mkdir(binPath, { recursive: true });
   await writeFile(eventsFile, "", "utf8");
 

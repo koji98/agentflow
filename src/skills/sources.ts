@@ -7,10 +7,11 @@ import { promisify } from "node:util";
 import { resolveSubpathWithinRoot } from "../path_rules.js";
 import type { SkillSourceDeclaration } from "../graph/authored.js";
 import type { GraphDiagnostic } from "../graph/schema.js";
+import { staleAgentflowDirectoryName, taskRuntimeDirectoryName } from "../generated_state.js";
 
 const execFileAsync = promisify(execFile);
 
-export const skillLockFileName = "agentflow.skills.lock.json";
+export const skillLockFileName = "task-runtime.skills.lock.json";
 
 export interface SkillLockEntry {
   kind: "git" | "local";
@@ -73,7 +74,12 @@ async function digestDirectory(root: string): Promise<string> {
   async function walk(directory: string): Promise<void> {
     const entries = await readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
-      if (entry.name === ".git" || entry.name === "node_modules" || entry.name === ".agentflow") {
+      if (
+        entry.name === ".git" ||
+        entry.name === "node_modules" ||
+        entry.name === taskRuntimeDirectoryName ||
+        entry.name === staleAgentflowDirectoryName
+      ) {
         continue;
       }
 
@@ -101,7 +107,7 @@ function lockfilePathForGraph(graphPath: string): string {
 }
 
 function skillCacheRootForGraph(graphPath: string): string {
-  return join(dirname(graphPath), ".agentflow", "skills");
+  return join(dirname(graphPath), taskRuntimeDirectoryName, "skills");
 }
 
 function resolveLocalSkillSourcePath(graphPath: string, localPath: string): string {
@@ -109,7 +115,7 @@ function resolveLocalSkillSourcePath(graphPath: string, localPath: string): stri
 }
 
 function cachePathForAliasCommit(alias: string, commitOrDigest: string): string {
-  return `.agentflow/skills/${alias}/${commitOrDigest.replace(/^sha256:/u, "sha256-")}`;
+  return `${taskRuntimeDirectoryName}/skills/${alias}/${commitOrDigest.replace(/^sha256:/u, "sha256-")}`;
 }
 
 function normalizeGitSkillSource(source: string): string {
@@ -255,7 +261,13 @@ async function discoverSkills(root: string, alias: string, diagnostics: GraphDia
     }
 
     for (const entry of entries) {
-      if (entry.isDirectory() && entry.name !== ".git" && entry.name !== "node_modules" && entry.name !== ".agentflow") {
+      if (
+        entry.isDirectory() &&
+        entry.name !== ".git" &&
+        entry.name !== "node_modules" &&
+        entry.name !== taskRuntimeDirectoryName &&
+        entry.name !== staleAgentflowDirectoryName
+      ) {
         await visit(join(directory, entry.name));
       }
     }
@@ -301,7 +313,7 @@ export async function resolveSkillSourcesForGraph(
         await rm(finalRoot, { recursive: true, force: true });
         await cp(sourceRoot, finalRoot, {
           recursive: true,
-          filter: (source) => !/(^|[/\\])(?:\.git|node_modules|\.agentflow)(?:[/\\]|$)/u.test(source)
+          filter: (source) => !/(^|[/\\])(?:\.git|node_modules|\.task-runtime|\.agentflow)(?:[/\\]|$)/u.test(source)
         });
         resolvedSkillSources.push({
           alias,

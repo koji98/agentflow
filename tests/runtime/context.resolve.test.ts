@@ -1487,14 +1487,18 @@ describe("context resolution", () => {
         await mkdir(join(repoDir, "src"), { recursive: true });
         await mkdir(join(repoDir, "ignored-dir"), { recursive: true });
         await mkdir(join(repoDir, "node_modules"), { recursive: true });
+        await mkdir(join(repoDir, ".task-runtime"), { recursive: true });
         await mkdir(join(repoDir, ".agentflow"), { recursive: true });
+        await mkdir(join(repoDir, ".agentflow-runtime"), { recursive: true });
         await writeFile(join(repoDir, ".gitignore"), "ignored-dir/\n");
         await writeFile(join(repoDir, ".ignore"), "src/extra.md\n");
         await writeFile(join(repoDir, "src", "keep.md"), "keep\n");
         await writeFile(join(repoDir, "src", "extra.md"), "extra\n");
         await writeFile(join(repoDir, "ignored-dir", "nested.md"), "nested\n");
         await writeFile(join(repoDir, "node_modules", "vendor.md"), "vendor\n");
+        await writeFile(join(repoDir, ".task-runtime", "run.md"), "run\n");
         await writeFile(join(repoDir, ".agentflow", "run.md"), "run\n");
+        await writeFile(join(repoDir, ".agentflow-runtime", "run.md"), "run\n");
         const graph = compileGraph({
             version: "1",
             graph_id: "context-ignore-glob",
@@ -1547,7 +1551,9 @@ describe("context resolution", () => {
         expect(indexText).toContain("| 1 | `src/keep.md` |");
         expect(indexText).not.toContain("ignored-dir/skip.md");
         expect(indexText).not.toContain("node_modules/skip.md");
-        expect(indexText).not.toContain(".agentflow/skip.md");
+        expect(indexText).not.toContain(".task-runtime/run.md");
+        expect(indexText).not.toContain(".agentflow/run.md");
+        expect(indexText).not.toContain(".agentflow-runtime/run.md");
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("lets explicit file inputs bypass ignore filtering", async () => {

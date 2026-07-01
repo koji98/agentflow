@@ -99,7 +99,7 @@ flowchart TD
 - default ignored roots and explicit ignored-root opt-ins
 - missing static workspace/plugin context as blockers
 
-Workspace globs skip common dependency and generated roots by default, including `.git`, `.agentflow`, `node_modules`, `.venv`, `venv`, `.tox`, cache directories, build output, coverage, `vendor`, `third_party`, `generated`, `gen`, `__generated__`, and Bazel output. Authors can intentionally opt into one of those roots by starting the authored context path inside that root, such as `.venv/*eval*.md`; broad globs like `**/*eval*` still skip those roots.
+Workspace globs skip common dependency and generated roots by default, including `.git`, `.task-runtime`, stale `.agentflow` runtime state, `.agentflow-runtime`, `node_modules`, `.venv`, `venv`, `.tox`, cache directories, build output, coverage, `vendor`, `third_party`, `generated`, `gen`, `__generated__`, and Bazel output. Authors can intentionally opt into one of those roots by starting the authored context path inside that root, such as `.venv/*eval*.md`; broad globs like `**/*eval*` still skip those roots.
 
 At runtime, each authored `workspace_glob` writes one attempt-local index file under `context/runtime/globs/<context-name>.md`. The index records the source pattern, matches found, matches included after `max_files`, limit status, ignored-root behavior, and a file table with paths, sizes, and digests. `runtime/context.json` and `human-debug/context-provenance.json` preserve file-level path/digest/size metadata for every included match.
 

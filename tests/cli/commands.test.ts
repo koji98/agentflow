@@ -1134,9 +1134,9 @@ process.exit(0);
         expect(payload.status).toBe("passed");
         expect(payload.message).toContain("durable artifacts are ready");
         expect(payload.path_resolution.graph_path).toBe(graphPath);
-        expect(payload.runs_root).toBe(join(tempRoot, ".agentflow", "runs"));
+        expect(payload.runs_root).toBe(join(tempRoot, ".task-runtime", "runs"));
         expect(payload.runs_root_source).toBe("graph-directory-default");
-        expect(payload.default_runs_root).toBe(join(tempRoot, ".agentflow", "runs"));
+        expect(payload.default_runs_root).toBe(join(tempRoot, ".task-runtime", "runs"));
         expect(payload.runs_root_contract).toContain("AGENTFLOW_RUNS_ROOT");
         expect(payload.run_root).toBe(join(payload.runs_root, payload.run_id));
         expect(payload.counts.passed).toBe(2);
@@ -2458,7 +2458,7 @@ process.exit(0);
             expect(payload.command).toBe("run");
             expect(payload.status).toBe("failed");
             expect(payload.message).toContain("AGENTFLOW_RUNS_ROOT must be an absolute path");
-            await expect(access(join(tempRoot, ".agentflow", "runs"))).rejects.toThrow();
+            await expect(access(join(tempRoot, ".task-runtime", "runs"))).rejects.toThrow();
         }
         finally {
             if (previousRunsRoot === undefined) {
@@ -2806,7 +2806,7 @@ process.exit(0);
             expect(listResult.exitCode).toBe(0);
             expect(listPayload.command).toBe("runs list");
             expect(listPayload.status).toBe("passed");
-            expect(listPayload.runs_root).toBe(join(tempRoot, ".agentflow", "runs"));
+            expect(listPayload.runs_root).toBe(join(tempRoot, ".task-runtime", "runs"));
             expect(listPayload.runs_root_source).toBe("graph-directory-default");
             expect(listPayload.graph_path).toBe(graphPath);
             expect(listPayload.runs_count).toBe(2);
@@ -2824,13 +2824,13 @@ process.exit(0);
             const secondParsed = JSON.parse(secondRun.stdout);
             expect(listPayload.runs[0]!.run_id).toBe(secondParsed.run_id);
             expect(listPayload.runs[1]!.run_id).toBe(firstParsed.run_id);
-            const explicitRunsRoot = await executeCli(["runs", "list", "--runs-root", join(tempRoot, ".agentflow", "runs")], tempRoot);
+            const explicitRunsRoot = await executeCli(["runs", "list", "--runs-root", join(tempRoot, ".task-runtime", "runs")], tempRoot);
             const explicitPayload = JSON.parse(explicitRunsRoot.stdout);
             expect(explicitRunsRoot.exitCode).toBe(0);
             expect(explicitPayload.runs_count).toBe(2);
-            expect(explicitPayload.runs_root).toBe(join(tempRoot, ".agentflow", "runs"));
+            expect(explicitPayload.runs_root).toBe(join(tempRoot, ".task-runtime", "runs"));
             expect(explicitPayload.runs_root_source).toBe("explicit");
-            expect(explicitPayload.runs_root_input).toBe(join(tempRoot, ".agentflow", "runs"));
+            expect(explicitPayload.runs_root_input).toBe(join(tempRoot, ".task-runtime", "runs"));
         }
         finally {
             stderrSpy.mockRestore();
