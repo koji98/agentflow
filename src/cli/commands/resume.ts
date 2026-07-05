@@ -215,11 +215,11 @@ export const resumeCommand = {
   summary: "Recompile the original graph for a failed, canceled, paused, or inactive running run root and preserve only unchanged passed work.",
   usage: "agentflow resume (--run-root <path/to/run-root> | --graph <path/to/graph> --latest)",
   examples: [
-    "agentflow resume --run-root .agentflow/runs/<run-id>",
-    "agentflow resume --run-root /absolute/path/to/.agentflow/runs/<run-id>",
+    "agentflow resume --run-root .task-runtime/runs/<run-id>",
+    "agentflow resume --run-root /absolute/path/to/.task-runtime/runs/<run-id>",
     "agentflow resume --graph ./agentflow.graph.json --latest",
-    "agentflow resume --run-root .agentflow/runs/<run-id> --dry-run",
-    "agentflow resume --run-root .agentflow/runs/<run-id> --reset-supervisor-budget"
+    "agentflow resume --run-root .task-runtime/runs/<run-id> --dry-run",
+    "agentflow resume --run-root .task-runtime/runs/<run-id> --reset-supervisor-budget"
   ] as const,
   optionNames: [
     "run-root",

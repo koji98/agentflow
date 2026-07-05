@@ -3,11 +3,18 @@ import { join } from "node:path";
 
 import ignore, { type Ignore } from "ignore";
 
+import {
+  staleAgentflowDirectoryName,
+  staleAgentflowRuntimeDirectoryName,
+  taskRuntimeDirectoryName
+} from "../../generated_state.js";
 import { normalizeRelativePath } from "./common.js";
 
 export const defaultContextIgnoredRoots = [
   ".git",
-  ".agentflow",
+  taskRuntimeDirectoryName,
+  staleAgentflowDirectoryName,
+  staleAgentflowRuntimeDirectoryName,
   "node_modules",
   ".venv",
   "venv",

@@ -4,14 +4,20 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import { resolveSubpathWithinRoot } from "../../path_rules.js";
+import {
+  staleAgentflowDirectoryName,
+  staleAgentflowRuntimeDirectoryName,
+  taskRuntimeDirectoryName
+} from "../../generated_state.js";
 import type { ContextItem } from "../../graph/authored.js";
 import { normalizeRelativePath, splitQualifiedPath } from "../context/common.js";
 
 const execFileAsync = promisify(execFile);
 const gitMaxBuffer = 100 * 1024 * 1024;
 const excludedRoots = new Set([
-  ".agentflow",
-  ".agentflow-runtime",
+  taskRuntimeDirectoryName,
+  staleAgentflowDirectoryName,
+  staleAgentflowRuntimeDirectoryName,
   ".git",
   ".next",
   ".turbo",

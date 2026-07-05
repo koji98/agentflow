@@ -35,11 +35,11 @@ export const runCommand = {
   usage: "agentflow run --graph <path/to/agentflow.graph.json> [--label <run_label>]",
   examples: [
     "agentflow run --graph ./agentflow.graph.json",
-    "AGENTFLOW_RUNS_ROOT=/absolute/path/to/.agentflow/runs agentflow run --graph ./agentflow.graph.json"
+    "AGENTFLOW_RUNS_ROOT=/absolute/path/to/.task-runtime/runs agentflow run --graph ./agentflow.graph.json"
   ] as const,
   optionNames: ["graph", "label", "config", "config-file", "help"] as const,
   helpNotes: [
-    "Runs default to <launch-cwd>/.agentflow/runs/<run-id> unless AGENTFLOW_RUNS_ROOT is set to an absolute path.",
+    "Runs default to <launch-cwd>/.task-runtime/runs/<run-id> unless AGENTFLOW_RUNS_ROOT is set to an absolute path.",
     "Press Ctrl-C in the launching terminal to cancel. The runtime waits for cleanup and durable artifacts capture the terminal Canceled state.",
     "Repo paths inside the graph resolve from the graph file directory even when --graph is passed relative to the launch shell.",
     "Use --config key=value (repeatable) and --config-file <path> to override top-level graph config; values like 1, true, [\"a\"] parse as JSON, others stay strings."

@@ -12,7 +12,7 @@ describe("agentflow observe", () => {
 
   beforeEach(async () => {
     tempRoot = await mkdtemp(join(tmpdir(), "agentflow-observe-"));
-    runRoot = join(tempRoot, ".agentflow", "runs", "run-123");
+    runRoot = join(tempRoot, ".task-runtime", "runs", "run-123");
     await mkdir(runRoot, { recursive: true });
     await writeFile(join(runRoot, "run.json"), `${JSON.stringify({
       owner: "test",

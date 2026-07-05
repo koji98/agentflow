@@ -177,8 +177,8 @@ export const inspectCommand = {
   summary: "Inspect a recorded run root and surface terminal status, counts, and failure stderr tails.",
   usage: "agentflow inspect <run-root>",
   examples: [
-    "agentflow inspect .agentflow/runs/<run-id>",
-    "agentflow inspect /absolute/path/to/.agentflow/runs/<run-id>"
+    "agentflow inspect .task-runtime/runs/<run-id>",
+    "agentflow inspect /absolute/path/to/.task-runtime/runs/<run-id>"
   ] as const,
   optionNames: ["help"] as const,
   helpNotes: [

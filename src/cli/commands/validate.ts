@@ -438,7 +438,7 @@ export const validateCommand = {
     "agentflow validate --graph ./agentflow.graph.json --strict",
     "agentflow validate --graph ./agentflow.graph.json --format summary",
     "agentflow validate --graph ./agentflow.graph.json --show-compiled",
-    "agentflow validate --graph ./agentflow.graph.json --output-dir .agentflow/validation/latest",
+    "agentflow validate --graph ./agentflow.graph.json --output-dir .task-runtime/validation/latest",
     "agentflow validate --graph ./agentflow.graph.json --diagram-output graph.mmd",
     "agentflow validate --graph ./agentflow.graph.json --diagram-image-output graph.svg",
     "agentflow validate --graph ./agentflow.graph.json --diagram-image-output graph.svg --diagram-image-package @mermaid-js/mermaid-cli@latest"

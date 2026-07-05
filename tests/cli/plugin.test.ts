@@ -370,7 +370,7 @@ describe("plugin workflows", () => {
                 commit: "local"
             })
         ]);
-        const lock = JSON.parse(await readFile(join(tempRoot, "agentflow.plugins.lock.json"), "utf8"));
+        const lock = JSON.parse(await readFile(join(tempRoot, "task-runtime.plugins.lock.json"), "utf8"));
         expect(lock.plugins.mathboard).toEqual(expect.objectContaining({
             kind: "local",
             path: "./mathboard-plugin",
@@ -537,7 +537,7 @@ describe("plugin workflows", () => {
         }, null, 2));
         const resolved = await executeCli(["plugin", "resolve", "--graph", graphPath], pluginDir);
         expect(resolved.exitCode, resolved.stdout).toBe(0);
-        expect(await readFile(join(pluginDir, "agentflow.plugins.lock.json"), "utf8")).toContain('"mathboard"');
+        expect(await readFile(join(pluginDir, "task-runtime.plugins.lock.json"), "utf8")).toContain('"mathboard"');
         const validated = await executeCli(["validate", "--graph", graphPath], pluginDir);
         expect(validated.exitCode, validated.stdout).toBe(0);
     });
@@ -643,7 +643,7 @@ describe("plugin workflows", () => {
                 commit: expect.any(String)
             })
         ]);
-        const lock = JSON.parse(await readFile(join(tempRoot, "agentflow.plugins.lock.json"), "utf8"));
+        const lock = JSON.parse(await readFile(join(tempRoot, "task-runtime.plugins.lock.json"), "utf8"));
         expect(lock.plugins.mathboard.commit).toEqual(expect.any(String));
         const compiled = await executeCli(["validate", "--graph", graphPath, "--show-compiled"], tempRoot);
         const payload = JSON.parse(compiled.stdout);
@@ -723,6 +723,6 @@ describe("plugin workflows", () => {
                 message: expect.stringContaining("Plugin aliases must use")
             })
         ]);
-        await expect(readFile(join(tempRoot, "agentflow.plugins.lock.json"), "utf8")).rejects.toThrow();
+        await expect(readFile(join(tempRoot, "task-runtime.plugins.lock.json"), "utf8")).rejects.toThrow();
     });
 });

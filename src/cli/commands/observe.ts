@@ -155,7 +155,7 @@ export const observeCommand = {
   summary: "Record, list, or resolve live human observations for a run without pausing it.",
   usage: "agentflow observe --run <run-root-or-id> <message> [options]\n       agentflow observe list --run <run-root-or-id> [options]\n       agentflow observe resolve --run <run-root-or-id> <observation-id> <message> [options]",
   examples: [
-    "agentflow observe --run .agentflow/runs/<run-id> \"Backend worker is running\"",
+    "agentflow observe --run .task-runtime/runs/<run-id> \"Backend worker is running\"",
     "agentflow observe --run <run-id> --blocking \"Export worker is unavailable\" --blocked-on backend_worker --recoverable-by operator",
     "agentflow observe list --run <run-id> --active",
     "agentflow observe resolve --run <run-id> <obs-id> \"Worker restored\""

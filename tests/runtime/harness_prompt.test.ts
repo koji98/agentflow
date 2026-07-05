@@ -139,6 +139,9 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain("graph context explains the larger mission");
     expect(prompt).toContain("The runner and CLI support your work; they are not the work target.");
     expect(prompt).not.toContain("Agentflow");
+    expect(prompt).not.toContain(".agentflow");
+    expect(prompt).not.toContain("agentflow.skills.lock.json");
+    expect(prompt).not.toContain("agentflow.plugins.lock.json");
     expect(prompt).not.toContain("round money");
     expect(prompt).not.toContain("Preserve API semantics with nullish or explicit checks");
   });

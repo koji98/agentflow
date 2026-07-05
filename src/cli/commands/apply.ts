@@ -83,9 +83,9 @@ export const applyCommand = {
   usage:
     "agentflow apply --run-root <path/to/run-root> [--repo <alias>] [--target <path>] [--allow-dirty] [--commit-message <message>]",
   examples: [
-    "agentflow apply --run-root .agentflow/runs/<run-id>",
-    "agentflow apply --run-root .agentflow/runs/<run-id> --repo main",
-    "agentflow apply --run-root .agentflow/runs/<run-id> --commit-message 'Apply Agentflow run changes'"
+    "agentflow apply --run-root .task-runtime/runs/<run-id>",
+    "agentflow apply --run-root .task-runtime/runs/<run-id> --repo main",
+    "agentflow apply --run-root .task-runtime/runs/<run-id> --commit-message 'Apply Agentflow run changes'"
   ] as const,
   optionNames: ["run-root", "repo", "target", "allow-dirty", "commit-message", "help"] as const,
   helpNotes: [

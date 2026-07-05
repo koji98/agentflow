@@ -87,9 +87,9 @@ export const evalCommand = {
   examples: [
     "agentflow eval validate evals/agentflow-workflow-quality",
     "agentflow eval run evals/agentflow-workflow-quality --variant current --trials 3",
-    "agentflow eval report .agentflow/evals/<eval-run-id> --format markdown",
-    "agentflow eval inspect .agentflow/evals/<eval-run-id> --scenario missing-dependency-docs --variant current --trial 1",
-    "agentflow eval compare .agentflow/evals/<eval-run-id> --baseline current --candidate terse"
+    "agentflow eval report .task-runtime/evals/<eval-run-id> --format markdown",
+    "agentflow eval inspect .task-runtime/evals/<eval-run-id> --scenario missing-dependency-docs --variant current --trial 1",
+    "agentflow eval compare .task-runtime/evals/<eval-run-id> --baseline current --candidate terse"
   ] as const,
   optionNames: [
     "scenario",

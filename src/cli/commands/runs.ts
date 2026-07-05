@@ -189,12 +189,12 @@ export const runsCommand = {
   usage: "agentflow runs list [--graph <path>] [--runs-root <path>]",
   examples: [
     "agentflow runs list --graph ./agentflow.graph.json",
-    "agentflow runs list --runs-root /absolute/path/to/.agentflow/runs"
+    "agentflow runs list --runs-root /absolute/path/to/.task-runtime/runs"
   ] as const,
   optionNames: ["graph", "runs-root", "help"] as const,
   helpNotes: [
     "Without --graph or --runs-root, the runs root is resolved from AGENTFLOW_RUNS_ROOT or the launch cwd default.",
-    "With --graph, the runs root resolves to <graph-directory>/.agentflow/runs (unless AGENTFLOW_RUNS_ROOT overrides it)."
+    "With --graph, the runs root resolves to <graph-directory>/.task-runtime/runs (unless AGENTFLOW_RUNS_ROOT overrides it)."
   ] as const,
   async run(
     options: Record<string, string | boolean | string[] | undefined>,

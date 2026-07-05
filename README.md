@@ -283,7 +283,7 @@ Switching from Codex CLI to Cursor CLI is a launch-profile choice, not a differe
 | Validate launch readiness | `agentflow validate --graph agentflow.graph.json` |
 | Fail on serious authoring findings | `agentflow validate --graph agentflow.graph.json --strict` |
 | Inspect compiled runtime contract | `agentflow validate --graph agentflow.graph.json --show-compiled` |
-| Write validation package | `agentflow validate --graph agentflow.graph.json --output-dir .agentflow/validation/latest` |
+| Write validation package | `agentflow validate --graph agentflow.graph.json --output-dir .task-runtime/validation/latest` |
 | Write Mermaid diagram | `agentflow validate --graph agentflow.graph.json --diagram-output graph.mmd` |
 | Render graph image | `agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg` |
 | Launch a run | `agentflow run --graph agentflow.graph.json` |
@@ -293,7 +293,7 @@ Switching from Codex CLI to Cursor CLI is a launch-profile choice, not a differe
 | List graph runs | `agentflow runs list --graph agentflow.graph.json` |
 | Validate an eval suite | `agentflow eval validate evals/<suite-id>` |
 | Run an eval suite | `agentflow eval run evals/<suite-id> --variant current --scenario all --trials 1` |
-| Generate an eval report | `agentflow eval report .agentflow/evals/<eval-run>` |
+| Generate an eval report | `agentflow eval report .task-runtime/evals/<eval-run>` |
 
 Image export uses `npx -y @mermaid-js/mermaid-cli` by default. Use `--diagram-image-package` to choose a package spec, or `--diagram-image-renderer mmdc` with `AGENTFLOW_MERMAID_CLI_BIN` for an installed binary.
 

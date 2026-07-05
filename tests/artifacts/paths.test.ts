@@ -28,23 +28,23 @@ import {
 } from "../../src/artifacts/paths.js";
 
 describe("runs root resolution", () => {
-  it("defaults to <graph-directory>/.agentflow/runs when a graph directory is provided", () => {
+  it("defaults to <graph-directory>/.task-runtime/runs when a graph directory is provided", () => {
     expect(
       resolveRunsRoot({
         currentWorkingDirectory: "/tmp/agentflow-launch",
         graphDirectory: "/tmp/agentflow-graphs/demo",
         environment: {}
       })
-    ).toBe("/tmp/agentflow-graphs/demo/.agentflow/runs");
+    ).toBe("/tmp/agentflow-graphs/demo/.task-runtime/runs");
   });
 
-  it("falls back to <launch-cwd>/.agentflow/runs when no graph directory or override is set", () => {
+  it("falls back to <launch-cwd>/.task-runtime/runs when no graph directory or override is set", () => {
     expect(
       resolveRunsRoot({
         currentWorkingDirectory: "/tmp/agentflow-launch",
         environment: {}
       })
-    ).toBe("/tmp/agentflow-launch/.agentflow/runs");
+    ).toBe("/tmp/agentflow-launch/.task-runtime/runs");
   });
 
   it("prefers an absolute AGENTFLOW_RUNS_ROOT override over the graph directory default", () => {
@@ -103,7 +103,7 @@ describe("runs root resolution", () => {
 
   it("bounds long node and execution ids to filesystem-safe directories", () => {
     const executionDir = resolveNodeExecutionDirectory(
-      "/tmp/agentflow-launch/.agentflow/runs/demo",
+      "/tmp/agentflow-launch/.task-runtime/runs/demo",
       "root__design_access_sync_program__managed__pattern_deep_work__workflow__design_access_sync_program__managed__pattern_deep_work__work_loop__design_access_sync_program__managed__pattern_deep_work__work_loop_body__design_access_sync_program__managed__pattern_deep_work__generate_validate",
       "exec__root__design_access_sync_program__managed__pattern_deep_work__workflow__design_access_sync_program__managed__pattern_deep_work__work_loop__design_access_sync_program__managed__pattern_deep_work__work_loop_body__design_access_sync_program__managed__pattern_deep_work__generate_validate__attempt_1__repeat_scope_scope__root__design_access_sync_program__managed__pattern_deep_work__workflow__design_access_sync_program__managed__pattern_deep_work__work_loop__iter_1"
     );
@@ -118,7 +118,7 @@ describe("runs root resolution", () => {
 
   it("uses ordered readable node directories when compiled node order is provided", () => {
     const executionDir = resolveNodeExecutionDirectory(
-      "/tmp/agentflow-launch/.agentflow/runs/demo",
+      "/tmp/agentflow-launch/.task-runtime/runs/demo",
       "root__repair_loop__repair_body__verify_fix",
       "exec__root__repair_loop__repair_body__verify_fix__attempt_1",
       {
@@ -139,7 +139,7 @@ describe("runs root resolution", () => {
 
   it("uses ordered execution directories for repeat iterations", () => {
     const executionDir = resolveNodeExecutionDirectory(
-      "/tmp/agentflow-launch/.agentflow/runs/demo",
+      "/tmp/agentflow-launch/.task-runtime/runs/demo",
       "root__retry__body__repair",
       "exec__root__retry__body__repair__attempt_12__repeat_scope__root__retry__iter_3",
       {

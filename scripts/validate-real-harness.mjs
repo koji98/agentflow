@@ -646,7 +646,7 @@ async function createSmokeFixture(spec) {
     tempRoot,
     launchRoot: canonicalLaunchRoot,
     graphPath,
-    runsRoot: join(await realpath(tempRoot), ".agentflow", "runs")
+    runsRoot: join(await realpath(tempRoot), ".task-runtime", "runs")
   };
 }
 
@@ -668,7 +668,7 @@ async function createSupervisorRecoveryFixture(spec) {
     tempRoot,
     launchRoot: canonicalLaunchRoot,
     graphPath,
-    runsRoot: join(await realpath(tempRoot), ".agentflow", "runs"),
+    runsRoot: join(await realpath(tempRoot), ".task-runtime", "runs"),
     docsUrl: docsServer.url,
     close: docsServer.close
   };

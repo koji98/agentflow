@@ -12,12 +12,13 @@ import {
   rewriteConfigPlaceholders,
   validateConfigAgainstSchema as sharedValidateConfigAgainstSchema
 } from "../graph/config.js";
+import { staleAgentflowDirectoryName, taskRuntimeDirectoryName } from "../generated_state.js";
 import type { GraphDiagnostic } from "../graph/schema.js";
 import type { LoweredManagedNode } from "../graph/normalize.js";
 
 const execFileAsync = promisify(execFile);
 
-export const pluginLockFileName = "agentflow.plugins.lock.json";
+export const pluginLockFileName = "task-runtime.plugins.lock.json";
 
 export type PluginDeclaration = GitPluginDeclaration | LocalPluginDeclaration;
 
@@ -133,7 +134,7 @@ function lockfilePathForGraph(graphPath: string): string {
 }
 
 function pluginCacheRootForGraph(graphPath: string): string {
-  return join(dirname(graphPath), ".agentflow", "plugins");
+  return join(dirname(graphPath), taskRuntimeDirectoryName, "plugins");
 }
 
 async function digestDirectory(root: string): Promise<string> {
@@ -146,7 +147,8 @@ async function digestDirectory(root: string): Promise<string> {
       if (
         entry.name === ".git" ||
         entry.name === "node_modules" ||
-        entry.name === ".agentflow" ||
+        entry.name === taskRuntimeDirectoryName ||
+        entry.name === staleAgentflowDirectoryName ||
         entry.name === pluginLockFileName
       ) {
         continue;
@@ -711,7 +713,7 @@ export async function resolvePluginsForGraph(
         ref: declaration.ref,
         commit,
         manifest_digest: manifestDigest,
-        cache_path: `.agentflow/plugins/${alias}/${commit}`,
+        cache_path: `${taskRuntimeDirectoryName}/plugins/${alias}/${commit}`,
         ...(Object.keys(toolDigests).length > 0 ? { tool_digests: toolDigests } : {})
       });
     } catch (error) {

@@ -1,6 +1,6 @@
 # Plugins
 
-Agentflow plugins package reusable team workflows and CLI tool capabilities. They resolve from Git or local folders, pin through `agentflow.plugins.lock.json`, and compile into normal Agentflow runtime behavior.
+Agentflow plugins package reusable team workflows and CLI tool capabilities. They resolve from Git or local folders, pin through `task-runtime.plugins.lock.json`, and compile into normal Agentflow runtime behavior.
 
 Plugins provide two surfaces:
 
@@ -40,7 +40,7 @@ Resolve before validate, run, or resume:
 agentflow plugin resolve --graph agentflow.graph.json
 ```
 
-Resolution clones Git plugins into `.agentflow/plugins`, checks out the requested ref, pins the commit, and writes `agentflow.plugins.lock.json` next to the graph. Local plugins keep their local path in the lockfile and store content digests so validation can detect changed local files.
+Resolution clones Git plugins into `.task-runtime/plugins`, checks out the requested ref, pins the commit, and writes `task-runtime.plugins.lock.json` next to the graph. Local plugins keep their local path in the lockfile and store content digests so validation can detect changed local files.
 
 ## Authoring Checklist
 

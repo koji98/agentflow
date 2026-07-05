@@ -78,7 +78,7 @@ function countNodeStatuses(nodeStatuses: Record<string, string>) {
 async function createFixtureRun() {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-projection-"));
     const repoDir = join(tempRoot, "repo");
-    const runsRoot = join(tempRoot, ".agentflow", "runs");
+    const runsRoot = join(tempRoot, ".task-runtime", "runs");
     const runRoot = join(runsRoot, "projection-fixture");
     const graphPath = join(tempRoot, "agentflow.graph.json");
     await mkdir(repoDir, { recursive: true });
@@ -282,7 +282,7 @@ async function createFixtureRun() {
 async function createAiTimeoutRun() {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-projection-ai-timeout-"));
     const repoDir = join(tempRoot, "repo");
-    const runRoot = join(tempRoot, ".agentflow", "runs", "ai-timeout-fixture");
+    const runRoot = join(tempRoot, ".task-runtime", "runs", "ai-timeout-fixture");
     await mkdir(repoDir, { recursive: true });
     await initGitRepo(repoDir);
     const document: AuthoredGraphDocument = {
@@ -365,7 +365,7 @@ async function createAiTimeoutRun() {
 async function createSoftVerificationRun() {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-projection-soft-verification-"));
     const repoDir = join(tempRoot, "repo");
-    const runRoot = join(tempRoot, ".agentflow", "runs", "soft-verification-fixture");
+    const runRoot = join(tempRoot, ".task-runtime", "runs", "soft-verification-fixture");
     await mkdir(repoDir, { recursive: true });
     await initGitRepo(repoDir);
     const document: AuthoredGraphDocument = {

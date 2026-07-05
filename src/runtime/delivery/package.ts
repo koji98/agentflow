@@ -609,7 +609,7 @@ function attemptPathForExecution(
 function sanitizeDeliveryEvidenceText(value: string): string {
   return value
     .replace(/\bhuman-debug\b/giu, "debug/audit evidence")
-    .replace(/\.agentflow\/runs\/[^\s)]+/giu, "run audit evidence")
+    .replace(/\.(?:task-runtime|agentflow)\/runs\/[^\s)]+/giu, "run audit evidence")
     .replace(/\/private\/tmp\/[^\s)]+/giu, "temporary run path");
 }
 
