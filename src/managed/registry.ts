@@ -75,6 +75,28 @@ export const managedPatternDescriptors = [
       { id: "verify", label: "Verify Item Ledger", summary: "Deterministically verify every frozen item completed before publication.", mode: "deterministic-check" },
       { id: "publish", label: "Publish Work List", summary: "Skip by default; write user-authored final artifacts from the verified item ledger when declared.", mode: "single-agent" }
     ]
+  }),
+  definePattern({
+    kind: "pattern_map_reduce",
+    label: "Pattern Map Reduce",
+    summary:
+      "Managed map-reduce pattern that discovers a finite independent item set, maps one evidence-backed worker over each item with bounded concurrency, and publishes one aggregate packet.",
+    contract_status: "implemented",
+    runtime_shape: "compiled-subgraph",
+    orchestration: {
+      summary:
+        "Discover independent items, deterministically freeze the item list, launch one managed item worker per frozen item with bounded concurrency, then deterministically reduce accepted item results into the aggregate artifact.",
+      planner: true,
+      fan_out: true,
+      council: false,
+      validation: true
+    },
+    phases: [
+      { id: "plan_items", label: "Plan Items", summary: "Discover the finite independent item set needed for the node contract.", mode: "single-agent" },
+      { id: "freeze", label: "Freeze Items", summary: "Validate and freeze sequential item ids, item inputs, scope rationale, omissions, and uncertainty.", mode: "deterministic-check" },
+      { id: "map_items", label: "Map Items", summary: "Launch bounded item workers and collect accepted structured item results.", mode: "parallel-agents" },
+      { id: "reduce", label: "Reduce Results", summary: "Deterministically verify item coverage and publish the aggregate artifact.", mode: "deterministic-check" }
+    ]
   })
 ] as const satisfies readonly ManagedPatternDescriptor[];
 

@@ -49,6 +49,7 @@ Managed patterns package common loop shapes while still compiling into normal Ag
 
 - `pattern_deep_work`: plan, execute, validate, grade criteria, write a scorecard, and retry until required criteria and threshold pass or the cycle budget is exhausted.
 - `pattern_work_list`: discover and freeze a bounded ordered list, execute each item, verify item evidence, retry item-local failures, and publish stable work-list artifacts.
+- `pattern_map_reduce`: discover and freeze a bounded independent item set, map the same item contract over each item with bounded concurrency, and publish stable aggregate evidence.
 - `pattern_deep_research`: run research angles, synthesize evidence, and publish one graph-addressable research artifact.
 
 Managed-loop feedback stays inside the pattern while the pattern can still make progress. When a managed boundary exhausts its allowed cycles, normal supervisor recovery gets one chance to recover if it can produce a real material delta.

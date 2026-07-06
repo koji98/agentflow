@@ -83,6 +83,13 @@ import {
   type PatternWorkListItemWorker,
   type PatternWorkListRubricCriterion
 } from "../managed/pattern_work_list.js";
+import {
+  buildPatternMapReduce,
+  type PatternMapReduceBlock,
+  type PatternMapReduceItemsBlock,
+  type PatternMapReduceMapBlock,
+  type PatternMapReduceReduceBlock
+} from "../managed/pattern_map_reduce.js";
 import type {
   ManagedPatternAgentOptions,
   ManagedPatternRuntime
@@ -3211,6 +3218,218 @@ function normalizePatternWorkListNode(
   });
 }
 
+function normalizePatternMapReduceItemsBlock(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternMapReduceItemsBlock | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "pattern_map_reduce.map_reduce.items must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["intent", "max_items"], diagnostics);
+
+  const intent = normalizeExecutableNodeIntent(record.intent, `${path}.intent`, diagnostics);
+  const max_items = readBoundedInteger(record.max_items, `${path}.max_items`, diagnostics, {
+    minimum: 1,
+    maximum: 500
+  }) ?? 100;
+
+  if (!intent) {
+    return undefined;
+  }
+
+  return {
+    intent,
+    max_items
+  };
+}
+
+function normalizePatternMapReduceMapBlock(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternMapReduceMapBlock | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "pattern_map_reduce.map_reduce.map must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["intent", "max_concurrency"], diagnostics);
+
+  const intent = normalizeExecutableNodeIntent(record.intent, `${path}.intent`, diagnostics);
+  const max_concurrency = readBoundedInteger(record.max_concurrency, `${path}.max_concurrency`, diagnostics, {
+    minimum: 1,
+    maximum: 32
+  }) ?? 4;
+
+  if (!intent) {
+    return undefined;
+  }
+
+  return {
+    intent,
+    max_concurrency
+  };
+}
+
+function normalizePatternMapReduceReduceBlock(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternMapReduceReduceBlock | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "pattern_map_reduce.map_reduce.reduce must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["intent"], diagnostics);
+
+  const intent = normalizeExecutableNodeIntent(record.intent, `${path}.intent`, diagnostics);
+  if (!intent) {
+    return undefined;
+  }
+
+  return {
+    intent
+  };
+}
+
+function normalizePatternMapReduceBlock(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternMapReduceBlock | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "pattern_map_reduce.map_reduce must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["items", "map", "reduce"], diagnostics);
+
+  const items = normalizePatternMapReduceItemsBlock(record.items, `${path}.items`, diagnostics);
+  const map = normalizePatternMapReduceMapBlock(record.map, `${path}.map`, diagnostics);
+  const reduce = normalizePatternMapReduceReduceBlock(record.reduce, `${path}.reduce`, diagnostics);
+
+  if (!items || !map || !reduce) {
+    return undefined;
+  }
+
+  return {
+    items,
+    map,
+    reduce
+  };
+}
+
+function normalizePatternMapReduceRuntime(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): ManagedPatternRuntime {
+  if (value === undefined) {
+    return {};
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "managed pattern runtime must be an object."
+    });
+    return {};
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["repo", "profile"], diagnostics);
+
+  const repo = readOptionalString(record.repo, `${path}.repo`, diagnostics);
+  const profile = readOptionalString(record.profile, `${path}.profile`, diagnostics);
+
+  return {
+    ...(repo ? { repo } : {}),
+    ...(profile ? { profile } : {})
+  };
+}
+
+function normalizePatternMapReduceNode(
+  record: Record<string, unknown>,
+  path: string,
+  diagnostics: GraphDiagnostic[],
+  loweredManagedNodes: LoweredManagedNode[]
+): SequenceNode | undefined {
+  pushUnknownKeyDiagnostics(
+    record,
+    path,
+    [
+      "type",
+      "id",
+      "label",
+      "runtime",
+      "intent",
+      "support",
+      "artifacts",
+      "model",
+      "reasoning_effort",
+      "sandbox",
+      "artifact_repair",
+      "map_reduce"
+    ],
+    diagnostics
+  );
+
+  const base = normalizeExecutableBase(record, path, diagnostics, {
+    allow_artifacts: false,
+    artifacts_disallowed_message: "pattern_map_reduce publishes only the aggregate artifact; frozen items and item results remain internal run evidence.",
+    runtime_extra_keys: ["max_concurrency"]
+  });
+  const agentOptions = normalizeManagedAgentOptions(record, path, diagnostics);
+  const map_reduce = normalizePatternMapReduceBlock(
+    record.map_reduce,
+    `${path}.map_reduce`,
+    diagnostics
+  );
+  const runtime = normalizePatternMapReduceRuntime(record.runtime, `${path}.runtime`, diagnostics);
+
+  if (!base || !map_reduce) {
+    return undefined;
+  }
+
+  loweredManagedNodes.push({
+    authored_id: base.id,
+    managed_kind: "pattern_map_reduce",
+    lowered_to: "sequence"
+  });
+
+  return buildPatternMapReduce({
+    ...base,
+    ...agentOptions,
+    map_reduce,
+    runtime
+  });
+}
+
 export function normalizeGraphNode(
   value: unknown,
   path: string,
@@ -3271,6 +3490,10 @@ export function normalizeGraphNode(
 
   if (type === "pattern_work_list") {
     return normalizePatternWorkListNode(record, path, diagnostics, loweredManagedNodes);
+  }
+
+  if (type === "pattern_map_reduce") {
+    return normalizePatternMapReduceNode(record, path, diagnostics, loweredManagedNodes);
   }
 
   diagnostics.push({

@@ -896,8 +896,8 @@ function shouldRequireValidationEvidence(node: BuildCompletionPacketOptions["nod
     return true;
   }
   return !(
-    managed.phase === "plan" &&
-    (managed.kind === "pattern_work_list" || managed.kind === "pattern_deep_work")
+    (managed.phase === "plan" || managed.phase === "plan_items") &&
+    (managed.kind === "pattern_work_list" || managed.kind === "pattern_deep_work" || managed.kind === "pattern_map_reduce")
   );
 }
 
@@ -907,8 +907,8 @@ function shouldRequireMilestoneEvidence(node: BuildCompletionPacketOptions["node
     return true;
   }
   return !(
-    managed.phase === "plan" &&
-    (managed.kind === "pattern_work_list" || managed.kind === "pattern_deep_work")
+    (managed.phase === "plan" || managed.phase === "plan_items") &&
+    (managed.kind === "pattern_work_list" || managed.kind === "pattern_deep_work" || managed.kind === "pattern_map_reduce")
   );
 }
 

@@ -39,6 +39,7 @@ Use `agentflow-authoring` when no graph exists yet. Use `agentflow-operations` f
 - Treat graph-construction semantics in graph JSON as a defect: authoring rationale, topology narration, node ids, managed-pattern lifecycle explanation, publisher mechanics, downstream routing, and `af` command instructions should not appear in prompt-facing fields unless the product task is Agentflow itself.
 - Treat pattern misfit as a launch blocker when decomposition makes agents locally obedient but globally less likely to finish the user's outcome.
 - Treat `pattern_work_list` as suspect for coherent implementation work unless item boundaries have independent product value and item-level completion improves review or delivery.
+- Treat `pattern_map_reduce` as suspect when item order, prior item evidence, shared or cumulative workspace mutation, or item-local retries are needed for correctness. Disjoint owned-path writes are acceptable only when each item freezes exact owned paths and downstream checks verify no out-of-scope edits.
 - Do not redesign the whole graph unless the current shape cannot satisfy the brief.
 
 ## Red Flags

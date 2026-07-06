@@ -20,8 +20,9 @@ Every managed pattern publishes graph-addressable artifacts from the authored no
 - `pattern_deep_research`: `research`.
 - `pattern_deep_work`: `packet`.
 - `pattern_work_list`: `work_items`.
+- `pattern_map_reduce`: `aggregate`.
 
-Authored artifacts merge with defaults for patterns that support authored artifacts. Internal artifacts remain readable in the run tree as implementation evidence, but downstream nodes should reference only graph-addressable artifacts such as `my_research.research`, `my_work.packet`, or `my_work_list.work_items`. Human-readable summaries are graph artifacts only when the workflow's product is a report or the graph explicitly authors a summary artifact.
+Authored artifacts merge with defaults for patterns that support authored artifacts. `pattern_deep_research` and `pattern_map_reduce` keep one fixed public artifact; use a downstream `agent` node when the workflow needs custom synthesis. Internal artifacts remain readable in the run tree as implementation evidence, but downstream nodes should reference only graph-addressable artifacts such as `my_research.research`, `my_work.packet`, `my_work_list.work_items`, or `my_audit.aggregate`. Human-readable summaries are graph artifacts only when the workflow's product is a report or the graph explicitly authors a summary artifact.
 
 ## Canonical Patterns
 
@@ -116,6 +117,61 @@ Add:
 The pattern runs a planner that writes only `work-list.json`, deterministically freezes it, launches one managed item execution per frozen item, verifies each item, then writes the runtime-owned `work_items` artifact. It skips a publisher when `work_items` is the only public artifact. Use `item_worker.kind: "deep_work"` when each item needs plan, execute, verify, scorecard feedback, and bounded retry semantics. Deep-work item phases mirror top-level `pattern_deep_work.phases`: phase intent/support/model/reasoning/sandbox/profile overrides are additive and phase-local. The default item finalization path promotes the accepted `draft-item-result.json` to `item-result.json` without LLM rewriting. `pass_threshold` gates the weighted item score and every required criterion score, so a required criterion below threshold keeps the item in retry even if the evaluator marked that criterion passed. Retries are item-local; accepted earlier items remain ledger evidence unless structured recovery evidence says they are contaminated. If `draft-item-result.json`, `item-result.json`, aggregate item results, or final work-item ledgers violate the runtime contract, Agentflow records a managed contract failure with exact artifact and retry-boundary evidence instead of converting the issue into vague retry guidance.
 
 `pattern_work_list` is generic. It does not know about branches, PRs, migrations, APIs, or UI. Those belong in the node intent, item guidance, and downstream artifacts.
+
+### `pattern_map_reduce`
+
+Use when the job is “find the finite independent item set, judge or process each item the same way, then publish aggregate evidence.”
+
+Add:
+
+```json
+{
+  "map_reduce": {
+    "items": {
+      "max_items": 80,
+      "intent": {
+        "goal": "Find route handlers that should be audited for authorization behavior.",
+        "acceptance_criteria": [
+          "The item list is finite.",
+          "Each item has a stable id, input, title, and scope rationale."
+        ],
+        "constraints": [
+          "Do not include generated files or dependency directories."
+        ]
+      }
+    },
+    "map": {
+      "max_concurrency": 6,
+      "intent": {
+        "goal": "Inspect one frozen route handler for authorization enforcement.",
+        "acceptance_criteria": [
+          "The item result records passed, finding, skipped, or blocked status.",
+          "The item result cites exact source evidence."
+        ],
+        "constraints": [
+          "Do not inspect unrelated route handlers except shared middleware needed to judge this item."
+        ]
+      }
+    },
+    "reduce": {
+      "intent": {
+        "goal": "Publish a verified aggregate authorization audit handoff.",
+        "acceptance_criteria": [
+          "Every frozen item has one terminal accepted result.",
+          "The aggregate groups findings, skipped items, blockers, evidence, and uncertainty."
+        ],
+        "constraints": [
+          "Do not claim coverage beyond the frozen item set and recorded discovery evidence."
+        ]
+      }
+    }
+  }
+}
+```
+
+The pattern runs an item planner that writes only `item-list.json`, deterministically freezes it, launches one managed map item execution per frozen item with bounded concurrency, then deterministically writes the runtime-owned `aggregate` artifact. V1 exposes only two knobs: `items.max_items` and `map.max_concurrency`. It does not expose source modes, item worker modes, reducer modes, dynamic item refs, custom public artifacts, or runtime-enforced path ownership.
+
+Use `pattern_map_reduce` for read-mostly audits, classifications, inventories, and review sweeps where items are independent. It can also fit write-partitioned refactors when each frozen item owns exact disjoint paths, map workers are constrained to those paths, and downstream checks verify no out-of-scope edits plus global correctness. Use `pattern_work_list` instead when order, prior item evidence, shared or cumulative workspace mutation, item-local retries, or item-level deep-work criteria matter. Use `pattern_deep_work` when the task is one coherent feature or repair.
 
 ## Supervisor Role
 

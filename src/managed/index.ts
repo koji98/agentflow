@@ -9,6 +9,10 @@ export {
   buildPatternWorkList,
   defaultPatternWorkListPublicArtifacts
 } from "./pattern_work_list.js";
+export {
+  buildPatternMapReduce,
+  defaultPatternMapReducePublicArtifacts
+} from "./pattern_map_reduce.js";
 export type {
   ManagedPatternRuntime,
   ManagedPatternAgentOptions,
@@ -44,3 +48,10 @@ export type {
   PatternWorkListItemWorker,
   PatternWorkListRubricCriterion
 } from "./pattern_work_list.js";
+export type {
+  PatternMapReduceBlock,
+  PatternMapReduceConfig,
+  PatternMapReduceItemsBlock,
+  PatternMapReduceMapBlock,
+  PatternMapReduceReduceBlock
+} from "./pattern_map_reduce.js";

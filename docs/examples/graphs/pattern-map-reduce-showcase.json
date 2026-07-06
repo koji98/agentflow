@@ -1,0 +1,164 @@
+{
+  "version": "1",
+  "graph_id": "pattern-map-reduce-showcase",
+  "intent": {
+    "goal": "Demonstrate a managed map-reduce pattern for independent documentation audit items.",
+    "acceptance_criteria": [
+      "The graph validates against the current v1 contract.",
+      "The managed node discovers, freezes, maps, and reduces independent item evidence.",
+      "A downstream deterministic check verifies the stable aggregate artifact."
+    ],
+    "constraints": [
+      "Do not depend on dynamic item refs."
+    ]
+  },
+  "repos": {
+    "main": {
+      "path": "../../.."
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "inplace"
+  },
+  "profiles": {
+    "default": {
+      "harness": "codex-cli",
+      "sandbox": "workspace-write"
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
+    }
+  },
+  "supervision": {
+    "profile": "supervisor",
+    "max_total_interventions": 3
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "pattern_map_reduce",
+        "id": "docs_term_audit",
+        "runtime": {
+          "repo": "main",
+          "profile": "default"
+        },
+        "intent": {
+          "goal": "Audit selected product documentation files for stale managed-pattern terminology.",
+          "acceptance_criteria": [
+            "Every selected documentation item is inspected or recorded with concrete skip/blocker evidence.",
+            "The aggregate artifact separates passed, finding, skipped, and blocked items with source evidence.",
+            "The coverage summary explains selected files, omissions, and residual uncertainty."
+          ],
+          "constraints": [
+            "Do not edit repository files."
+          ]
+        },
+        "support": {
+          "context": [
+            {
+              "kind": "workspace_glob",
+              "name": "product_docs",
+              "path": "docs/product/*.md",
+              "max_files": 12,
+              "what": "Product documentation files that describe Agentflow workflow and managed-pattern behavior.",
+              "why": "The item planner needs a bounded documentation set to select independent audit items."
+            }
+          ]
+        },
+        "map_reduce": {
+          "items": {
+            "max_items": 8,
+            "intent": {
+              "goal": "Find product documentation files that should be audited for stale managed-pattern terminology.",
+              "acceptance_criteria": [
+                "The item list is finite.",
+                "Each item has a stable id, input, title, and scope rationale.",
+                "The item list records omitted candidates and uncertainty when relevant."
+              ],
+              "constraints": [
+                "Do not include generated files or dependency directories."
+              ]
+            }
+          },
+          "map": {
+            "max_concurrency": 3,
+            "intent": {
+              "goal": "Inspect one frozen documentation item for stale managed-pattern terminology.",
+              "acceptance_criteria": [
+                "The item result records passed, finding, skipped, or blocked status.",
+                "The item result cites exact source evidence.",
+                "Findings include the stale term, rationale, and source evidence."
+              ],
+              "constraints": [
+                "Do not inspect unrelated files except linked docs needed to judge this item."
+              ]
+            }
+          },
+          "reduce": {
+            "intent": {
+              "goal": "Publish a verified aggregate documentation terminology audit.",
+              "acceptance_criteria": [
+                "Every frozen item has one terminal accepted result.",
+                "The aggregate groups findings, passes, skipped items, blockers, and uncertainty.",
+                "The aggregate is sufficient for downstream review without reading item directories first."
+              ],
+              "constraints": [
+                "Do not claim full documentation coverage beyond the frozen item set and recorded discovery evidence."
+              ]
+            }
+          }
+        }
+      },
+      {
+        "type": "check",
+        "id": "verify_aggregate_artifact",
+        "check_kind": "deterministic",
+        "command": "node",
+        "args": [
+          "-e",
+          "const fs=require('node:fs'); const path=require('node:path'); const input=process.env.AGENTFLOW_CONTEXT_AGGREGATE; const outputDir=process.env.AGENTFLOW_OUTPUT_DIR; const data=JSON.parse(fs.readFileSync(input,'utf8')); const counts=data.counts||{}; const items=Array.isArray(data.items)?data.items:[]; const total=Object.values(counts).reduce((sum,value)=>sum+value,0); const passed=data.status==='completed' && items.length>0 && total===items.length && items.every((item,index)=>item && item.id===`m${index+1}` && typeof item.summary==='string' && item.summary.trim().length>0); const result={passed,status:data.status,item_count:items.length,counts}; if (outputDir) { fs.mkdirSync(outputDir,{recursive:true}); fs.writeFileSync(path.join(outputDir,'verification.json'), JSON.stringify(result,null,2)+'\\n'); } console.log(JSON.stringify(result)); process.exit(passed?0:1);"
+        ],
+        "pass_if": {
+          "json_path": "$.passed",
+          "equals": true
+        },
+        "intent": {
+          "goal": "Verify the managed map-reduce node published a stable completed aggregate artifact.",
+          "acceptance_criteria": [
+            "The artifact status is completed.",
+            "The aggregate includes at least one sequential item with a summary.",
+            "The status counts equal the item count."
+          ],
+          "constraints": [
+            "Do not edit repository files."
+          ]
+        },
+        "runtime": {
+          "repo": "main"
+        },
+        "support": {
+          "context": [
+            {
+              "kind": "artifact",
+              "name": "aggregate",
+              "ref": "docs_term_audit.aggregate",
+              "what": "Stable aggregate evidence from the managed map-reduce node.",
+              "why": "The deterministic check verifies the aggregate item coverage contract is present and suitable for later review."
+            }
+          ]
+        },
+        "artifacts": {
+          "verification": {
+            "from": "output_dir",
+            "path": "verification.json",
+            "description": "Structured result for the aggregate artifact verification."
+          }
+        }
+      }
+    ]
+  }
+}

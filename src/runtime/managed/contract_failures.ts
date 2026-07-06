@@ -16,7 +16,7 @@ export const managedContractFailureKinds = [
 export type ManagedContractFailureKind = (typeof managedContractFailureKinds)[number];
 
 export interface ManagedContractFinding {
-  managed_kind: "pattern_deep_research" | "pattern_deep_work" | "pattern_work_list";
+  managed_kind: "pattern_deep_research" | "pattern_deep_work" | "pattern_work_list" | "pattern_map_reduce";
   phase: string;
   item_id?: string;
   artifact_name?: string;

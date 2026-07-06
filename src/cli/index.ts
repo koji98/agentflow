@@ -212,7 +212,7 @@ function renderGraphHelp(): string {
     "- The runtime executes compiled graphs only.",
     "- validate runs authored validation, compilation, full authoring review, local readiness checks, plugin tool help, credential diagnostics, and context analysis by default.",
     "- sequence, parallel, and repeat are authoring containers, not executable runtime nodes.",
-    "- pattern_deep_research, pattern_deep_work, and pattern_work_list are implemented as managed patterns that lower into generated primitive subgraphs.",
+    "- pattern_deep_research, pattern_deep_work, pattern_work_list, and pattern_map_reduce are implemented as managed patterns that lower into generated primitive subgraphs.",
     "- plugin workflow nodes use type = plugin, uses = plugin_alias/workflow_id, and config = workflow-specific settings; run agentflow plugin resolve --graph first.",
     "- repeat.until.node must target a descendant check or checkpoint node.",
     "- checkpoint nodes are planned human gates inside repeat bodies; supervisor authority pauses require typed runtime AuthorityRequests and resume with structured human input.",

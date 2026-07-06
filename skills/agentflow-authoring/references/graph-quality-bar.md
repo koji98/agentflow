@@ -17,7 +17,7 @@ Before launch, verify:
 - Downstream nodes consume artifact refs, not raw logs or assumed workspace state.
 - Deterministic checks validate stable facts.
 - Rubrics or review nodes cover semantic quality.
-- Unknown item counts use `pattern_work_list` instead of guessing a fixed stack of nodes.
+- Unknown item counts use `pattern_work_list` when ordered item completion matters or `pattern_map_reduce` when independent item judgments or owned-path changes should publish aggregate evidence, instead of guessing a fixed stack of nodes.
 - Profiles, repos, sandbox, tools, credentials, and supervision are explicit.
 - Planned human decisions use checkpoints.
 - `agentflow plugin resolve --graph <path>` is planned when plugins exist.
