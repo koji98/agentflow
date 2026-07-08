@@ -226,6 +226,8 @@ const promptSurfaceExampleLeakPatterns = [
   /\bpattern_deep_research\b/iu,
   /\bpattern_deep_work\b/iu,
   /\bpattern_work_list\b/iu,
+  /\bpattern_map_reduce\b/iu,
+  /\bpattern_candidate_selection\b/iu,
   /\b(?:this|the|a)\s+managed pattern\b/iu,
   /\bprivate angle report\b/iu,
   /\bsynthesis node\b/iu,

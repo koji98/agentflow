@@ -83,6 +83,19 @@ import {
   type PatternWorkListItemWorker,
   type PatternWorkListRubricCriterion
 } from "../managed/pattern_work_list.js";
+import {
+  buildPatternMapReduce,
+  type PatternMapReduceBlock,
+  type PatternMapReduceItemsBlock,
+  type PatternMapReduceMapBlock,
+  type PatternMapReduceReduceBlock
+} from "../managed/pattern_map_reduce.js";
+import {
+  buildPatternCandidateSelection,
+  type PatternCandidateSelectionBlock,
+  type PatternCandidateSelectionCandidate,
+  type PatternCandidateSelectionCriterion
+} from "../managed/pattern_candidate_selection.js";
 import type {
   ManagedPatternAgentOptions,
   ManagedPatternRuntime
@@ -3211,6 +3224,505 @@ function normalizePatternWorkListNode(
   });
 }
 
+function normalizePatternMapReduceItemsBlock(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternMapReduceItemsBlock | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "pattern_map_reduce.map_reduce.items must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["intent", "max_items"], diagnostics);
+
+  const intent = normalizeExecutableNodeIntent(record.intent, `${path}.intent`, diagnostics);
+  const max_items = readBoundedInteger(record.max_items, `${path}.max_items`, diagnostics, {
+    minimum: 1,
+    maximum: 500
+  }) ?? 100;
+
+  if (!intent) {
+    return undefined;
+  }
+
+  return {
+    intent,
+    max_items
+  };
+}
+
+function normalizePatternMapReduceMapBlock(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternMapReduceMapBlock | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "pattern_map_reduce.map_reduce.map must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["intent", "max_concurrency"], diagnostics);
+
+  const intent = normalizeExecutableNodeIntent(record.intent, `${path}.intent`, diagnostics);
+  const max_concurrency = readBoundedInteger(record.max_concurrency, `${path}.max_concurrency`, diagnostics, {
+    minimum: 1,
+    maximum: 32
+  }) ?? 4;
+
+  if (!intent) {
+    return undefined;
+  }
+
+  return {
+    intent,
+    max_concurrency
+  };
+}
+
+function normalizePatternMapReduceReduceBlock(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternMapReduceReduceBlock | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "pattern_map_reduce.map_reduce.reduce must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["intent"], diagnostics);
+
+  const intent = normalizeExecutableNodeIntent(record.intent, `${path}.intent`, diagnostics);
+  if (!intent) {
+    return undefined;
+  }
+
+  return {
+    intent
+  };
+}
+
+function normalizePatternMapReduceBlock(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternMapReduceBlock | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "pattern_map_reduce.map_reduce must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["items", "map", "reduce"], diagnostics);
+
+  const items = normalizePatternMapReduceItemsBlock(record.items, `${path}.items`, diagnostics);
+  const map = normalizePatternMapReduceMapBlock(record.map, `${path}.map`, diagnostics);
+  const reduce = normalizePatternMapReduceReduceBlock(record.reduce, `${path}.reduce`, diagnostics);
+
+  if (!items || !map || !reduce) {
+    return undefined;
+  }
+
+  return {
+    items,
+    map,
+    reduce
+  };
+}
+
+function normalizePatternMapReduceRuntime(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): ManagedPatternRuntime {
+  if (value === undefined) {
+    return {};
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "managed pattern runtime must be an object."
+    });
+    return {};
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["repo", "profile"], diagnostics);
+
+  const repo = readOptionalString(record.repo, `${path}.repo`, diagnostics);
+  const profile = readOptionalString(record.profile, `${path}.profile`, diagnostics);
+
+  return {
+    ...(repo ? { repo } : {}),
+    ...(profile ? { profile } : {})
+  };
+}
+
+function normalizePatternMapReduceNode(
+  record: Record<string, unknown>,
+  path: string,
+  diagnostics: GraphDiagnostic[],
+  loweredManagedNodes: LoweredManagedNode[]
+): SequenceNode | undefined {
+  pushUnknownKeyDiagnostics(
+    record,
+    path,
+    [
+      "type",
+      "id",
+      "label",
+      "runtime",
+      "intent",
+      "support",
+      "artifacts",
+      "model",
+      "reasoning_effort",
+      "sandbox",
+      "artifact_repair",
+      "map_reduce"
+    ],
+    diagnostics
+  );
+
+  const base = normalizeExecutableBase(record, path, diagnostics, {
+    allow_artifacts: false,
+    artifacts_disallowed_message: "pattern_map_reduce publishes only the aggregate artifact; frozen items and item results remain internal run evidence.",
+    runtime_extra_keys: ["max_concurrency"]
+  });
+  const agentOptions = normalizeManagedAgentOptions(record, path, diagnostics);
+  const map_reduce = normalizePatternMapReduceBlock(
+    record.map_reduce,
+    `${path}.map_reduce`,
+    diagnostics
+  );
+  const runtime = normalizePatternMapReduceRuntime(record.runtime, `${path}.runtime`, diagnostics);
+
+  if (!base || !map_reduce) {
+    return undefined;
+  }
+
+  loweredManagedNodes.push({
+    authored_id: base.id,
+    managed_kind: "pattern_map_reduce",
+    lowered_to: "sequence"
+  });
+
+  return buildPatternMapReduce({
+    ...base,
+    ...agentOptions,
+    map_reduce,
+    runtime
+  });
+}
+
+function normalizeSelectionCandidateId(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): string | undefined {
+  return normalizeManagedLocalId(value, path, "Candidate id", diagnostics);
+}
+
+function normalizeSelectionCriterionId(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): string | undefined {
+  return normalizeManagedLocalId(value, path, "Selection criterion id", diagnostics);
+}
+
+function normalizePatternCandidateSelectionCandidate(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternCandidateSelectionCandidate | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "pattern_candidate_selection.selection.candidates entries must be objects."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["id", "intent"], diagnostics);
+
+  const id = normalizeSelectionCandidateId(record.id, `${path}.id`, diagnostics);
+  const intent = normalizeExecutableNodeIntent(record.intent, `${path}.intent`, diagnostics);
+
+  if (!id || !intent) {
+    return undefined;
+  }
+
+  return {
+    id,
+    intent
+  };
+}
+
+function normalizePatternCandidateSelectionCriterion(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternCandidateSelectionCriterion | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "pattern_candidate_selection.selection.criteria entries must be objects."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["id", "weight", "required", "rubric"], diagnostics);
+
+  const id = normalizeSelectionCriterionId(record.id, `${path}.id`, diagnostics);
+  const weight = readBoundedNumber(record.weight, `${path}.weight`, diagnostics, {
+    minimum: 0,
+    maximum: 1,
+    required: true
+  });
+  const required = readBoolean(record.required, `${path}.required`, diagnostics);
+  const rubric = readRequiredString(record.rubric, `${path}.rubric`, diagnostics);
+
+  if (!id || weight === undefined || !rubric) {
+    return undefined;
+  }
+
+  return {
+    id,
+    weight,
+    ...(required !== undefined ? { required } : {}),
+    rubric
+  };
+}
+
+function normalizePatternCandidateSelectionBlock(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternCandidateSelectionBlock | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "pattern_candidate_selection.selection must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["candidates", "pass_threshold", "criteria"], diagnostics);
+
+  const pass_threshold = readBoundedNumber(record.pass_threshold, `${path}.pass_threshold`, diagnostics, {
+    minimum: 0,
+    maximum: 1
+  }) ?? 0.8;
+
+  if (!Array.isArray(record.candidates)) {
+    diagnostics.push({
+      path: `${path}.candidates`,
+      message: "pattern_candidate_selection.selection.candidates must be an array."
+    });
+    return undefined;
+  }
+
+  if (record.candidates.length < 2) {
+    diagnostics.push({
+      path: `${path}.candidates`,
+      message: "pattern_candidate_selection.selection.candidates must include at least 2 candidates."
+    });
+  }
+
+  if (record.candidates.length > 8) {
+    diagnostics.push({
+      path: `${path}.candidates`,
+      message: "pattern_candidate_selection.selection.candidates supports at most 8 candidates."
+    });
+  }
+
+  if (!Array.isArray(record.criteria)) {
+    diagnostics.push({
+      path: `${path}.criteria`,
+      message: "pattern_candidate_selection.selection.criteria must be an array."
+    });
+    return undefined;
+  }
+
+  if (record.criteria.length === 0) {
+    diagnostics.push({
+      path: `${path}.criteria`,
+      message: "pattern_candidate_selection.selection.criteria must include at least one criterion."
+    });
+  }
+
+  const candidates = record.candidates
+    .map((candidate, index) => normalizePatternCandidateSelectionCandidate(
+      candidate,
+      `${path}.candidates[${index}]`,
+      diagnostics
+    ))
+    .filter((candidate): candidate is PatternCandidateSelectionCandidate => candidate !== undefined);
+
+  const seenCandidateIds = new Set<string>();
+  candidates.forEach((candidate, index) => {
+    if (seenCandidateIds.has(candidate.id)) {
+      diagnostics.push({
+        path: `${path}.candidates[${index}].id`,
+        message: `Duplicate candidate id "${candidate.id}".`
+      });
+    }
+    seenCandidateIds.add(candidate.id);
+  });
+
+  const criteria = record.criteria
+    .map((criterion, index) => normalizePatternCandidateSelectionCriterion(
+      criterion,
+      `${path}.criteria[${index}]`,
+      diagnostics
+    ))
+    .filter((criterion): criterion is PatternCandidateSelectionCriterion => criterion !== undefined);
+
+  const seenCriterionIds = new Set<string>();
+  criteria.forEach((criterion, index) => {
+    if (seenCriterionIds.has(criterion.id)) {
+      diagnostics.push({
+        path: `${path}.criteria[${index}].id`,
+        message: `Duplicate selection criterion id "${criterion.id}".`
+      });
+    }
+    seenCriterionIds.add(criterion.id);
+  });
+
+  const weightTotal = criteria.reduce((sum, criterion) => sum + criterion.weight, 0);
+  if (criteria.length > 0 && Math.abs(weightTotal - 1) > 0.001) {
+    diagnostics.push({
+      path: `${path}.criteria`,
+      message: `Selection criterion weights must sum to 1. Current total is ${Number(weightTotal.toFixed(4))}.`
+    });
+  }
+
+  if (candidates.length < 2 || candidates.length > 8 || criteria.length === 0) {
+    return undefined;
+  }
+
+  return {
+    candidates,
+    pass_threshold,
+    criteria
+  };
+}
+
+function normalizePatternCandidateSelectionRuntime(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): ManagedPatternRuntime {
+  if (value === undefined) {
+    return {};
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "managed pattern runtime must be an object."
+    });
+    return {};
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["repo", "profile"], diagnostics);
+
+  const repo = readOptionalString(record.repo, `${path}.repo`, diagnostics);
+  const profile = readOptionalString(record.profile, `${path}.profile`, diagnostics);
+
+  return {
+    ...(repo ? { repo } : {}),
+    ...(profile ? { profile } : {})
+  };
+}
+
+function normalizePatternCandidateSelectionNode(
+  record: Record<string, unknown>,
+  path: string,
+  diagnostics: GraphDiagnostic[],
+  loweredManagedNodes: LoweredManagedNode[]
+): SequenceNode | undefined {
+  pushUnknownKeyDiagnostics(
+    record,
+    path,
+    [
+      "type",
+      "id",
+      "label",
+      "runtime",
+      "intent",
+      "support",
+      "artifacts",
+      "model",
+      "reasoning_effort",
+      "sandbox",
+      "artifact_repair",
+      "selection"
+    ],
+    diagnostics
+  );
+
+  const base = normalizeExecutableBase(record, path, diagnostics, {
+    allow_artifacts: false,
+    artifacts_disallowed_message: "pattern_candidate_selection publishes only the selection artifact; candidate packets, diversity checks, and scorecards remain internal run evidence.",
+    runtime_extra_keys: ["max_concurrency"]
+  });
+  const agentOptions = normalizeManagedAgentOptions(record, path, diagnostics);
+  const selection = normalizePatternCandidateSelectionBlock(
+    record.selection,
+    `${path}.selection`,
+    diagnostics
+  );
+  const runtime = normalizePatternCandidateSelectionRuntime(record.runtime, `${path}.runtime`, diagnostics);
+
+  if (!base || !selection) {
+    return undefined;
+  }
+
+  loweredManagedNodes.push({
+    authored_id: base.id,
+    managed_kind: "pattern_candidate_selection",
+    lowered_to: "sequence"
+  });
+
+  return buildPatternCandidateSelection({
+    ...base,
+    ...agentOptions,
+    selection,
+    runtime
+  });
+}
+
 export function normalizeGraphNode(
   value: unknown,
   path: string,
@@ -3271,6 +3783,14 @@ export function normalizeGraphNode(
 
   if (type === "pattern_work_list") {
     return normalizePatternWorkListNode(record, path, diagnostics, loweredManagedNodes);
+  }
+
+  if (type === "pattern_map_reduce") {
+    return normalizePatternMapReduceNode(record, path, diagnostics, loweredManagedNodes);
+  }
+
+  if (type === "pattern_candidate_selection") {
+    return normalizePatternCandidateSelectionNode(record, path, diagnostics, loweredManagedNodes);
   }
 
   diagnostics.push({

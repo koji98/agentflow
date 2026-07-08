@@ -973,7 +973,7 @@ describe("graph normalization", () => {
         expect(unknownNode.diagnostics).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 path: "$.graph.steps[0].type",
-                message: "Node type must be one of: agent, exec, check, checkpoint, sequence, parallel, repeat, pattern_deep_research, pattern_deep_work, pattern_work_list."
+                message: "Node type must be one of: agent, exec, check, checkpoint, sequence, parallel, repeat, pattern_deep_research, pattern_deep_work, pattern_work_list, pattern_map_reduce, pattern_candidate_selection."
             })
         ]));
         const nonObject = normalizeAuthoredGraphDocument(null);

@@ -137,6 +137,7 @@ import {
   type ReadyNode,
   type SchedulerTopology
 } from "./scheduler.js";
+import { isManagedMapReduceMapItemsNode, runManagedMapReduceItems } from "../managed/map_reduce_items.js";
 import { isManagedWorkListRunItemsNode, runManagedWorkListItems } from "../managed/work_list_items.js";
 import {
   deepWorkCriterionContractFindings,
@@ -500,7 +501,12 @@ function latestOutcomeOverall(session: RuntimeSession, compiledId: string): Grap
 }
 
 interface ManagedProgressInfo {
-  managed_kind: "pattern_deep_research" | "pattern_deep_work" | "pattern_work_list";
+  managed_kind:
+    | "pattern_deep_research"
+    | "pattern_deep_work"
+    | "pattern_work_list"
+    | "pattern_map_reduce"
+    | "pattern_candidate_selection";
   managed_authored_id: string;
   phase: string;
 }
@@ -513,6 +519,8 @@ function parseManagedAuthoredId(
     loweredFrom === "pattern_deep_research"
     || loweredFrom === "pattern_deep_work"
     || loweredFrom === "pattern_work_list"
+    || loweredFrom === "pattern_map_reduce"
+    || loweredFrom === "pattern_candidate_selection"
   ) {
     return {
       managed_kind: loweredFrom,
@@ -521,7 +529,7 @@ function parseManagedAuthoredId(
     };
   }
 
-  for (const managedKind of ["pattern_deep_research", "pattern_deep_work", "pattern_work_list"] as const) {
+  for (const managedKind of ["pattern_deep_research", "pattern_deep_work", "pattern_work_list", "pattern_map_reduce", "pattern_candidate_selection"] as const) {
     const marker = `__managed__${managedKind}__`;
     const markerIndex = authoredId.indexOf(marker);
 
@@ -1106,15 +1114,24 @@ async function buildManagedCompletionSummary(options: {
 }): Promise<CompletionManagedSummary | undefined> {
   if (
     options.node.kind === "agent" &&
-    options.node.managed_runtime?.kind === "pattern_work_list" &&
-    options.node.managed_runtime.phase === "run_items"
+    (
+      (
+        options.node.managed_runtime?.kind === "pattern_work_list" &&
+        options.node.managed_runtime.phase === "run_items"
+      ) ||
+      (
+        options.node.managed_runtime?.kind === "pattern_map_reduce" &&
+        options.node.managed_runtime.phase === "map_items"
+      )
+    )
   ) {
+    const managedKind = options.node.managed_runtime.kind;
     const requiredArtifacts = ["item_results"];
     const missing = requiredArtifacts.filter((name) => !options.artifacts[name]);
     const contractFailure = await activeManagedContractFailureSummary(options.attempt);
     return {
       active: true,
-      managed_kind: "pattern_work_list",
+      managed_kind: managedKind,
       ready_for_publish: missing.length === 0 && !contractFailure,
       blocking_criteria: [
         ...missing.map((name) => `${name}_missing`),
@@ -2947,6 +2964,9 @@ async function defaultAgentExecutor(
 
   if (isManagedWorkListRunItemsNode(context.node)) {
     return runManagedWorkListItems(context, harnesses);
+  }
+  if (isManagedMapReduceMapItemsNode(context.node)) {
+    return runManagedMapReduceItems(context, harnesses);
   }
 
   const invocationOutputDir = outputDir;

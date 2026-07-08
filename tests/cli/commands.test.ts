@@ -2678,7 +2678,7 @@ process.exit(0);
         const graphHelp = await executeCli(["graph-help"]);
         expect(graphHelp.exitCode).toBe(0);
         expect(graphHelp.stdout).toContain("Executable node kinds: agent, exec, check, checkpoint");
-        expect(graphHelp.stdout).toContain("Managed pattern scaffolds: pattern_deep_research, pattern_deep_work, pattern_work_list");
+        expect(graphHelp.stdout).toContain("Managed pattern scaffolds: pattern_deep_research, pattern_deep_work, pattern_work_list, pattern_map_reduce, pattern_candidate_selection");
         expect(graphHelp.stdout).not.toContain("Legacy thin aliases");
         expect(graphHelp.stdout).toContain(`"version": "1"`);
         expect(graphHelp.stdout).toContain("checkpoint nodes are planned human gates inside repeat bodies");

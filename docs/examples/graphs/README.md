@@ -19,7 +19,10 @@ Included examples:
 - `fake-plan.json`: small read-only primitive graph.
 - `feature-showcase.json`: primitive graph covering profiles, parallelism, repeat, checks, artifacts, and delivery.
 - `pattern-deep-research-showcase.json`: explicit research angles plus downstream handoff.
+- `pattern-candidate-selection-showcase.json`: authored candidate strategies, shared criteria, and stable selection verification.
 - `pattern-deep-work-showcase.json`: completion criteria, scorecard loop, and downstream handoff.
+- `pattern-map-reduce-showcase.json`: independent item discovery, bounded map item fan-out, aggregate verification.
+- `pattern-work-list-showcase.json`: ordered item discovery, item execution, and stable work-list verification.
 - `ship-feature.graph.json`: Codex/Cursor-compatible plugin tool example using the local babysit plugin.
 
 Validate an example:

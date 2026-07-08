@@ -27,8 +27,10 @@ Graph JSON is prompt source code. Prompt-facing fields should contain only the r
 | `check` with `kind: "ai"` | Read-only evaluator prompt with graph/check intent, context/artifact evidence, rubric, and JSON verdict contract. | Use for semantic gates. Make the rubric judge observable artifacts, not private reasoning or implementation preference. |
 | plugin-lowered agent node | Plugin workflow config/context is interpolated, then lowered to normal prompt-backed nodes with plugin file context and managed tool grants. | Keep plugin config schema-backed. Add `what`/`why` to plugin file context. Do not hide product intent inside plugin files alone. |
 | `pattern_deep_research` | Angle worker prompts, synthesis prompts, then publisher prompt. Each angle sees the parent contract, support, and its assigned angle; synthesis sees accepted reports; publisher writes one complete `research.md`. | Make angles controlling lenses. Put the assigned angle in direct, specific language. Downstream nodes consume `research`; important detail should be in that one report, not hidden in internal angle artifacts. |
+| `pattern_candidate_selection` | Candidate worker prompts develop authored strategy packets; one diversity check judges material distinctness; criterion checks score each candidate against shared rubrics; a deterministic selector writes `selection`. | Use only when candidate strategies are known. Author each candidate intent as a distinct strategy lane, write criteria as shared evidence standards, and make downstream work consume `selection`. |
 | `pattern_deep_work` | Planner, worker/validator, criterion evaluator, scorecard gate, retry, and publisher prompts. Parent intent/support flow into the work loop; criteria become grading prompts and gate weights. Optional `phases.plan`, `phases.execute`, `phases.verify`, and `phases.publish` overrides compile only into their matching phase. | Use for bounded mutation with feedback. Criteria should cover correctness, convention fit, no AI slop, validation evidence, and handoff quality when relevant. Add phase overrides when planning, implementation, judging, or publishing need different additive intent, support, model, sandbox, or reasoning policy. |
 | `pattern_work_list` | Planner prompt discovers a finite ordered list; runtime freezes it; one managed item prompt executes each frozen item; optional deep-work item criteria and item verifier grade that item; publisher writes stable artifacts. | Use when item count is unknown until discovery. Author `planning_goal`, `what_counts_as_one_item`, and `done_when`; do not pre-bake fake item rows. |
+| `pattern_map_reduce` | Planner prompt discovers a finite independent item set; runtime freezes it; one managed item prompt judges or processes each frozen item with bounded concurrency; deterministic reducer writes `aggregate`. | Use when items are independent and the final value is aggregate evidence, including write-partitioned refactors with exact disjoint owned paths. Author `items.intent`, `map.intent`, and `reduce.intent`; do not add item worker modes, reducer modes, dynamic item refs, or shared mutation. |
 
 ## Per-Node Authoring Guidance
 
@@ -77,6 +79,20 @@ Authoring rules:
 - Treat raw angle and synthesis reports as internal run evidence. They may conflict; the final publisher must resolve contradictions before publishing `research.md`.
 - Do not ask the research agent for machine JSON unless JSON is the actual user-facing deliverable.
 
+### `pattern_candidate_selection`
+
+Candidate selection lowers into one candidate worker per authored strategy, one diversity evaluator across all candidate packets, one criterion evaluator per candidate and criterion pair, and a deterministic selector. Candidate workers are non-mutating: they publish implementation-ready strategy JSON, not source patches.
+
+Authoring rules:
+
+- Use the parent `goal` to name the decision being made.
+- Treat `selection.candidates` as user-authored strategy lanes. Do not ask the pattern to discover strategies or set a candidate count.
+- Give every candidate a distinct intent block. The candidate goal should name the primary strategy, acceptance criteria should require implementation outline, validation plan, risk, assumptions, and evidence, and constraints should preserve the lane's tradeoff.
+- Make criteria shared, weighted, and observable. Required criteria should represent hard blockers such as repo fit, safety, policy, or migration feasibility.
+- Use deep research before candidate selection when strategies are unknown.
+- Use deep work after candidate selection when the chosen strategy should be implemented.
+- Downstream nodes should reference `my_selection.selection`, not internal candidate packets, diversity checks, criterion scorecards, or lowered ids.
+
 ### `pattern_deep_work`
 
 Deep work lowers into planning, work/validation, criteria evaluation, scorecard gate, retry, and publish phases. Parent support and intent flow through the loop. Criteria become independent evaluator prompts and weighted gate inputs, so bad criteria cause bad retries. Phase overrides are additive and phase-local: `plan` affects the planner prompt and policy, `execute` affects the worker/validator, `verify` affects AI criteria prompts and check policy, and `publish` affects the final publisher.
@@ -104,6 +120,20 @@ Authoring rules:
 - Use item phases only for real differences between item planning, execution, verification, and publication. Do not duplicate the parent work-list goal or item guidance in every phase.
 - Criteria for `deep_work` items should target the item handoff, workspace outcome, and ledger coherence. They should not depend on dynamic ids outside the frozen list.
 - Downstream nodes reference stable work-list artifacts such as `summary` and `work_items`, not `w1` or `w3`.
+
+### `pattern_map_reduce`
+
+Map-reduce lowers into an item planner, deterministic freeze step, runtime-managed item workers with bounded concurrency, and a deterministic reducer. The item planner sees the parent contract plus `map_reduce.items.intent`. Each map worker sees exactly one current frozen item plus `map_reduce.map.intent`. The reducer uses `map_reduce.reduce.intent` to shape aggregate coverage and overclaim boundaries, but V1 does not add an LLM publisher.
+
+Authoring rules:
+
+- Use `items.intent` to define what finite units are in scope and what makes an item independently inspectable.
+- Use `map.intent` to define what one worker must determine or change for exactly one current item.
+- Use `reduce.intent` to define what the aggregate must prove and what it must not claim.
+- Bound discovery with `items.max_items` and fan-out with `map.max_concurrency`.
+- For write-partitioned refactors, each frozen item must name exact owned paths, `map.intent` must prohibit edits outside the current item's owned paths, and downstream checks must verify changed paths and global correctness. V1 does not enforce owned-path boundaries automatically.
+- Do not use graph prose to explain map-reduce mechanics, internal ids, item-result paths, aggregate counts, or downstream routing.
+- Use `pattern_work_list` instead when item order, prior item evidence, shared or cumulative workspace mutation, or item-local retries are part of correctness.
 
 ## Runtime-Owned AI Surfaces
 

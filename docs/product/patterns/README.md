@@ -5,7 +5,9 @@ These pages describe the managed workflow patterns that compile into normal Agen
 ## Pattern Chooser
 
 - `deep-research.md`: use when the output is a sourced research package, recommendation, or multi-angle review.
+- `candidate-selection.md`: use when candidate strategies are already known and the workflow must choose the best evidence-backed option before implementation.
 - `deep-work.md`: use when an agent should work, validate, critique, and fix until a weighted completion rubric passes.
 - `work-list.md`: use when the bounded outcome is known, but the correct ordered list of work items must be discovered and frozen before execution.
+- `map-reduce.md`: use when a finite independent item set should receive the same item-level treatment and publish one aggregate evidence packet, including disjoint owned-path refactors with explicit verification.
 
 For the catalog and shared managed-pattern behavior, see `../managed-patterns.md`.

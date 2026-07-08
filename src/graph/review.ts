@@ -10,7 +10,7 @@ import type {
   CompiledGraph,
   CompiledScope
 } from "./compiled.js";
-import { reservedArtifactNames } from "./schema.js";
+import { managedPatternKinds, reservedArtifactNames } from "./schema.js";
 
 export type GraphReviewMode = "review" | "strict";
 export type GraphReviewSeverity = "info" | "warning" | "serious";
@@ -77,6 +77,31 @@ const credentialToolDescription = "credential-backed";
 const automaticArtifactNames = new Set<string>(reservedArtifactNames);
 const managedPhaseNames = ["plan", "execute", "verify", "publish"] as const;
 
+function managedRootFromInternalAuthoredId(authoredId: string): string | undefined {
+  for (const managedKind of managedPatternKinds) {
+    const marker = `__managed__${managedKind}__`;
+    const markerIndex = authoredId.indexOf(marker);
+    if (markerIndex !== -1) {
+      return authoredId.slice(0, markerIndex);
+    }
+  }
+  return undefined;
+}
+
+function isSameManagedInternalHandoff(consumerNode: CompiledExecutableNode, producerNodeId: string): boolean {
+  const producerRoot = managedRootFromInternalAuthoredId(producerNodeId);
+  if (!producerRoot) {
+    return false;
+  }
+
+  const consumerInternalRoot = managedRootFromInternalAuthoredId(consumerNode.authored_id);
+  if (consumerInternalRoot) {
+    return consumerInternalRoot === producerRoot;
+  }
+
+  return consumerNode.lowered_from !== undefined && consumerNode.authored_id === producerRoot;
+}
+
 interface PromptSurfaceField {
   path: string;
   text: string;
@@ -93,6 +118,8 @@ const promptSurfaceLeakPatterns: Array<{ label: string; pattern: RegExp }> = [
   { label: "pattern_deep_research", pattern: /\bpattern_deep_research\b/iu },
   { label: "pattern_deep_work", pattern: /\bpattern_deep_work\b/iu },
   { label: "pattern_work_list", pattern: /\bpattern_work_list\b/iu },
+  { label: "pattern_map_reduce", pattern: /\bpattern_map_reduce\b/iu },
+  { label: "pattern_candidate_selection", pattern: /\bpattern_candidate_selection\b/iu },
   { label: "managed pattern mechanics", pattern: /\b(?:this|the|a)\s+managed pattern\b/iu },
   { label: "private angle report", pattern: /\bprivate angle report\b/iu },
   { label: "synthesis node", pattern: /\bsynthesis node\b/iu },
@@ -493,6 +520,57 @@ function collectPromptSurfaceFieldsFromNode(
       }
     }
   }
+
+  if (type === "pattern_map_reduce") {
+    const mapReduce = asRecord(node.map_reduce);
+    const items = asRecord(mapReduce?.items);
+    const map = asRecord(mapReduce?.map);
+    const reduce = asRecord(mapReduce?.reduce);
+
+    addPromptSurfaceIntentFields(fields, items?.intent, `${path}.map_reduce.items.intent`, {
+      goalSeverity: "serious",
+      detailSeverity: "serious",
+      audience: "map-reduce item planner"
+    });
+    addPromptSurfaceIntentFields(fields, map?.intent, `${path}.map_reduce.map.intent`, {
+      goalSeverity: "serious",
+      detailSeverity: "serious",
+      audience: "map-reduce item worker"
+    });
+    addPromptSurfaceIntentFields(fields, reduce?.intent, `${path}.map_reduce.reduce.intent`, {
+      goalSeverity: "serious",
+      detailSeverity: "serious",
+      audience: "map-reduce reducer"
+    });
+  }
+
+  if (type === "pattern_candidate_selection") {
+    const selection = asRecord(node.selection);
+    const candidates = Array.isArray(selection?.candidates) ? selection.candidates : [];
+    candidates.forEach((candidate, index) => {
+      const candidateRecord = asRecord(candidate);
+      if (!candidateRecord) {
+        return;
+      }
+      addPromptSurfaceIntentFields(fields, candidateRecord.intent, `${path}.selection.candidates[${index}].intent`, {
+        goalSeverity: "serious",
+        detailSeverity: "serious",
+        audience: "candidate strategy worker"
+      });
+    });
+
+    const criteria = Array.isArray(selection?.criteria) ? selection.criteria : [];
+    criteria.forEach((criterion, index) => {
+      const criterionRecord = asRecord(criterion);
+      if (!criterionRecord) {
+        return;
+      }
+      addPromptSurfaceString(fields, criterionRecord.rubric, `${path}.selection.criteria[${index}].rubric`, {
+        severity: "serious",
+        audience: "candidate criterion evaluator"
+      });
+    });
+  }
 }
 
 function collectPromptSurfaceFields(value: unknown): PromptSurfaceField[] {
@@ -538,6 +616,7 @@ function reviewPromptSurface(
       recommendation: "Rewrite this field for the runtime reader: state the outcome, evidence, or boundary only; keep graph shape, pattern choice, and authoring rationale outside graph JSON."
     });
   }
+
 }
 
 function reviewIntent(document: AuthoredGraphDocument, findings: GraphReviewFinding[]): void {
@@ -677,7 +756,11 @@ function reviewExecutableNode(
       });
     }
 
-    if ("ref" in item && automaticArtifactNames.has(item.artifact)) {
+    if (
+      "ref" in item &&
+      automaticArtifactNames.has(item.artifact) &&
+      !isSameManagedInternalHandoff(node, item.node)
+    ) {
       pushFinding(findings, {
         severity: "warning",
         category: "handoff",

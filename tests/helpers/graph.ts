@@ -10,7 +10,7 @@ export function withNodeIntentDefaults<TDocument>(document: TDocument): TDocumen
     }
     const record = node as Record<string, unknown>;
     const type = String(record.type ?? "");
-    if (["agent", "exec", "check", "checkpoint", "pattern_deep_research", "pattern_deep_work", "pattern_work_list"].includes(type)) {
+    if (["agent", "exec", "check", "checkpoint", "pattern_deep_research", "pattern_deep_work", "pattern_work_list", "pattern_map_reduce", "pattern_candidate_selection"].includes(type)) {
       const intent = (record.intent && typeof record.intent === "object" && !Array.isArray(record.intent))
         ? record.intent as Record<string, unknown>
         : {};
