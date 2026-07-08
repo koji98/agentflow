@@ -38,6 +38,7 @@ If the brief is missing or vague, use `agentflow-intake` first. If a graph is al
 
 - Choose patterns by the ask. There is no default managed pattern; the best pattern is the one that preserves the user outcome, validation path, and review evidence with the least unnecessary coordination.
 - Use `pattern_deep_research` when the job is to understand, compare, plan, or review.
+- Use `pattern_candidate_selection` when candidate strategies are already known, the user or graph author chooses which strategies to compare, and the workflow needs one deterministic evidence-backed selection before implementation.
 - Use `pattern_deep_work` when one coherent work product should be produced or mutated through a bounded feedback loop.
 - Use `pattern_work_list` when the bounded outcome requires discovering, freezing, and completing a finite list of independently reviewable items whose item-level completion improves product quality.
 - Use `pattern_map_reduce` when the bounded outcome requires discovering, freezing, and judging or processing a finite independent item set with the same item contract, then publishing one aggregate evidence packet. It may also fit write-partitioned refactors when each item owns exact disjoint paths and downstream checks verify no out-of-scope edits.
@@ -76,7 +77,7 @@ Before handing off:
 - [ ] Every executable node has meaningful intent and non-empty acceptance criteria.
 - [ ] A runtime prose table was drafted before JSON, and prompt-facing fields contain no graph-authoring rationale or pattern mechanics.
 - [ ] Every prompt-facing field was reviewed as LLM input and contains no graph-construction semantics, authoring rationale, topology narration, downstream-node mechanics, or managed-pattern lifecycle explanation.
-- [ ] Authored inputs translate into the intended AI prompt surfaces for `agent`, AI `check`, plugin-lowered, `pattern_deep_research`, `pattern_deep_work`, `pattern_work_list`, and `pattern_map_reduce` nodes.
+- [ ] Authored inputs translate into the intended AI prompt surfaces for `agent`, AI `check`, plugin-lowered, `pattern_deep_research`, `pattern_candidate_selection`, `pattern_deep_work`, `pattern_work_list`, and `pattern_map_reduce` nodes.
 - [ ] The chosen primitive or managed pattern improves the final product outcome, validation path, and review evidence; it is not just an orchestration preference.
 - [ ] Every graph-level and node-level constraint is a prohibition-style boundary that starts with `Do not`; positive requirements are in acceptance criteria.
 - [ ] Support is expressed through capabilities, selected skills, CLI hints, managed tools, and node-local context pointers.

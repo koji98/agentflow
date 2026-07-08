@@ -1201,7 +1201,7 @@ function prepareGeneratedGraphNode(node) {
       context: prepared.support.context.map(prepareGeneratedContextItem)
     };
   }
-  if (["agent", "exec", "check", "checkpoint", "pattern_deep_research", "pattern_deep_work", "pattern_work_list", "pattern_map_reduce"].includes(prepared.type) && !prepared.intent) {
+  if (["agent", "exec", "check", "checkpoint", "pattern_deep_research", "pattern_deep_work", "pattern_work_list", "pattern_map_reduce", "pattern_candidate_selection"].includes(prepared.type) && !prepared.intent) {
     prepared.intent = {
       goal: `Run ${prepared.id}.`,
       acceptance_criteria: ["The node satisfies its local eval contract."],

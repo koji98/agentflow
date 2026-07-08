@@ -18,11 +18,12 @@ Managed nodes use regular node fields:
 Every managed pattern publishes graph-addressable artifacts from the authored node id. Default artifacts depend on the pattern:
 
 - `pattern_deep_research`: `research`.
+- `pattern_candidate_selection`: `selection`.
 - `pattern_deep_work`: `packet`.
 - `pattern_work_list`: `work_items`.
 - `pattern_map_reduce`: `aggregate`.
 
-Authored artifacts merge with defaults for patterns that support authored artifacts. `pattern_deep_research` and `pattern_map_reduce` keep one fixed public artifact; use a downstream `agent` node when the workflow needs custom synthesis. Internal artifacts remain readable in the run tree as implementation evidence, but downstream nodes should reference only graph-addressable artifacts such as `my_research.research`, `my_work.packet`, `my_work_list.work_items`, or `my_audit.aggregate`. Human-readable summaries are graph artifacts only when the workflow's product is a report or the graph explicitly authors a summary artifact.
+Authored artifacts merge with defaults for patterns that support authored artifacts. `pattern_deep_research`, `pattern_candidate_selection`, and `pattern_map_reduce` keep one fixed public artifact; use a downstream `agent` node when the workflow needs custom synthesis. Internal artifacts remain readable in the run tree as implementation evidence, but downstream nodes should reference only graph-addressable artifacts such as `my_research.research`, `my_selection.selection`, `my_work.packet`, `my_work_list.work_items`, or `my_audit.aggregate`. Human-readable summaries are graph artifacts only when the workflow's product is a report or the graph explicitly authors a summary artifact.
 
 ## Canonical Patterns
 
@@ -48,6 +49,65 @@ The pattern runs authored angles in parallel, synthesizes Markdown research repo
 The final publisher rewrites the angle and synthesis evidence into one coherent, sufficiently detailed, conflict-resolved research report with citations to original source evidence, not internal report artifacts. Downstream nodes reference `my_research.research`; if a detail matters downstream, it belongs in that report.
 
 Angle and synthesis workers may mention related findings from other reports, but they should not create cross-angle links or companion graph-addressable files.
+
+### `pattern_candidate_selection`
+
+Use when the job is “compare known strategies, choose one, and preserve the decision evidence.”
+
+Add:
+
+```json
+{
+  "selection": {
+    "candidates": [
+      {
+        "id": "minimal_patch",
+        "intent": {
+          "goal": "Develop the smallest safe strategy using existing architecture.",
+          "acceptance_criteria": [
+            "The candidate explains implementation, validation, risk, assumptions, and evidence."
+          ],
+          "constraints": [
+            "Do not introduce new infrastructure."
+          ]
+        }
+      },
+      {
+        "id": "central_policy",
+        "intent": {
+          "goal": "Develop a centralized policy strategy.",
+          "acceptance_criteria": [
+            "The candidate defines the shared boundary and migration path."
+          ]
+        }
+      }
+    ],
+    "pass_threshold": 0.8,
+    "criteria": [
+      {
+        "id": "repo_fit",
+        "weight": 0.4,
+        "required": true,
+        "rubric": "The candidate fits existing repository architecture and conventions."
+      },
+      {
+        "id": "risk",
+        "weight": 0.35,
+        "rubric": "The candidate minimizes implementation and rollout risk."
+      },
+      {
+        "id": "testability",
+        "weight": 0.25,
+        "rubric": "The candidate has a clear focused validation path."
+      }
+    ]
+  }
+}
+```
+
+The pattern runs one non-mutating strategy worker per authored candidate, checks that the candidate packets differ materially, scores every candidate against every shared rubric criterion, then deterministically writes the runtime-owned `selection` artifact. Required criteria are hard blockers when they fail or score below `pass_threshold`; eligible candidates are ranked by weighted total and ties use authored candidate order.
+
+Candidate strategies are authored by the graph author. Use `pattern_deep_research` before candidate selection when the workflow still needs to discover which strategies to compare. Use `pattern_deep_work` after candidate selection when the selected strategy should be implemented. Downstream nodes should consume `my_selection.selection`, not internal candidate packets or scorecards.
 
 ### `pattern_deep_work`
 

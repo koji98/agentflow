@@ -1,0 +1,179 @@
+{
+  "version": "1",
+  "graph_id": "pattern-candidate-selection-showcase",
+  "intent": {
+    "goal": "Select a documentation strategy for clarifying Agentflow managed-pattern authoring guidance.",
+    "acceptance_criteria": [
+      "The workflow validates against the current v1 contract.",
+      "The strategy selection compares authored candidates against one shared criteria set.",
+      "The selected strategy packet includes ranking, rejection rationale, diversity evidence, and residual uncertainty."
+    ],
+    "constraints": [
+      "Do not edit repository files."
+    ]
+  },
+  "repos": {
+    "main": {
+      "path": "../../.."
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "inplace"
+  },
+  "profiles": {
+    "default": {
+      "harness": "codex-cli",
+      "sandbox": "workspace-write"
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
+    }
+  },
+  "supervision": {
+    "profile": "supervisor",
+    "max_total_interventions": 3
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "pattern_candidate_selection",
+        "id": "managed_pattern_strategy",
+        "runtime": {
+          "repo": "main",
+          "profile": "default"
+        },
+        "intent": {
+          "goal": "Select the best documentation strategy for clarifying when graph authors should choose managed patterns.",
+          "acceptance_criteria": [
+            "Every candidate strategy includes implementation outline, validation plan, risks, assumptions, and cited evidence.",
+            "The selected strategy is ready for a later implementation node to execute without rediscovering the decision.",
+            "Rejected strategies include clear rationale tied to the shared criteria."
+          ],
+          "constraints": [
+            "Do not edit repository files.",
+            "Do not recommend changes outside managed-pattern authoring guidance."
+          ]
+        },
+        "support": {
+          "context": [
+            {
+              "kind": "workspace_file",
+              "name": "managed_patterns_doc",
+              "path": "docs/product/managed-patterns.md",
+              "what": "Product documentation that defines managed-pattern behavior and public artifacts.",
+              "why": "Candidate strategies must fit the current product guidance."
+            },
+            {
+              "kind": "workspace_file",
+              "name": "authoring_managed_patterns_skill",
+              "path": "skills/agentflow-authoring/references/managed-patterns.md",
+              "what": "Authoring skill guidance for choosing and using managed patterns.",
+              "why": "Candidate strategies must keep docs and authoring guidance aligned."
+            }
+          ]
+        },
+        "selection": {
+          "candidates": [
+            {
+              "id": "minimal_docs_patch",
+              "intent": {
+                "goal": "Develop a minimal documentation patch strategy that adds only the missing managed-pattern selection guidance.",
+                "acceptance_criteria": [
+                  "The strategy identifies the smallest doc and skill surfaces to update.",
+                  "The strategy explains focused validation and review evidence.",
+                  "The strategy records risks and assumptions about reader understanding."
+                ],
+                "constraints": [
+                  "Do not propose broad restructuring."
+                ]
+              }
+            },
+            {
+              "id": "decision_matrix",
+              "intent": {
+                "goal": "Develop a decision-matrix strategy that adds a compact comparison table for managed-pattern selection.",
+                "acceptance_criteria": [
+                  "The strategy defines the table dimensions and where they belong.",
+                  "The strategy explains how the table avoids duplicating existing pattern pages.",
+                  "The strategy records risks, assumptions, and validation evidence."
+                ],
+                "constraints": [
+                  "Do not propose a standalone framework outside existing docs."
+                ]
+              }
+            }
+          ],
+          "pass_threshold": 0.8,
+          "criteria": [
+            {
+              "id": "repo_fit",
+              "weight": 0.4,
+              "required": true,
+              "rubric": "The candidate fits existing Agentflow documentation structure and authoring skill conventions."
+            },
+            {
+              "id": "reader_clarity",
+              "weight": 0.35,
+              "rubric": "The candidate helps graph authors choose the right managed pattern without adding unnecessary concepts."
+            },
+            {
+              "id": "validation_path",
+              "weight": 0.25,
+              "rubric": "The candidate has a focused validation path using existing docs, skill, and graph validation checks."
+            }
+          ]
+        }
+      },
+      {
+        "type": "check",
+        "id": "verify_selection_artifact",
+        "check_kind": "deterministic",
+        "command": "node",
+        "args": [
+          "-e",
+          "const fs=require('node:fs'); const path=require('node:path'); const input=process.env.AGENTFLOW_CONTEXT_SELECTION; const outputDir=process.env.AGENTFLOW_OUTPUT_DIR; const data=JSON.parse(fs.readFileSync(input,'utf8')); const ranking=Array.isArray(data.ranking)?data.ranking:[]; const rejected=Array.isArray(data.rejected)?data.rejected:[]; const selected=data.selected&&typeof data.selected==='object'?data.selected:{}; const passed=data.schema_version===1&&data.status==='selected'&&typeof data.selected_candidate_id==='string'&&data.selected_candidate_id.length>0&&selected.id===data.selected_candidate_id&&ranking.length>=2&&rejected.length>=1&&data.diversity&&data.diversity.passed===true; const result={passed,status:data.status,selected_candidate_id:data.selected_candidate_id,ranking_count:ranking.length,rejected_count:rejected.length}; if (outputDir) { fs.mkdirSync(outputDir,{recursive:true}); fs.writeFileSync(path.join(outputDir,'verification.json'), JSON.stringify(result,null,2)+'\\n'); } console.log(JSON.stringify(result)); process.exit(passed?0:1);"
+        ],
+        "pass_if": {
+          "json_path": "$.passed",
+          "equals": true
+        },
+        "intent": {
+          "goal": "Verify the strategy selection packet is complete enough for later implementation.",
+          "acceptance_criteria": [
+            "The selection status is selected.",
+            "The selected packet matches the selected candidate id.",
+            "The packet includes ranking, rejected candidates, and passing diversity evidence."
+          ],
+          "constraints": [
+            "Do not edit repository files."
+          ]
+        },
+        "runtime": {
+          "repo": "main"
+        },
+        "support": {
+          "context": [
+            {
+              "kind": "artifact",
+              "name": "selection",
+              "ref": "managed_pattern_strategy.selection",
+              "what": "Strategy selection packet from the candidate comparison.",
+              "why": "The verification command checks that the selected strategy evidence is complete enough for later implementation."
+            }
+          ]
+        },
+        "artifacts": {
+          "verification": {
+            "from": "output_dir",
+            "path": "verification.json",
+            "description": "Structured result for the strategy selection artifact verification."
+          }
+        }
+      }
+    ]
+  }
+}

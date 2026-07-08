@@ -48,7 +48,7 @@ describe("managed pattern normalization edges", () => {
         expect(normalized.diagnostics).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 path: "$.graph.steps[0].type",
-                message: "Node type must be one of: agent, exec, check, checkpoint, sequence, parallel, repeat, pattern_deep_research, pattern_deep_work, pattern_work_list, pattern_map_reduce."
+                message: "Node type must be one of: agent, exec, check, checkpoint, sequence, parallel, repeat, pattern_deep_research, pattern_deep_work, pattern_work_list, pattern_map_reduce, pattern_candidate_selection."
             })
         ]));
     });

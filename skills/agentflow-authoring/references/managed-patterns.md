@@ -22,6 +22,27 @@ Angle and synthesis workers may reference related findings in prose, but they sh
 
 Deep-research helpers should be authored as evidence gatherers, not implementation workers. They run in disposable investigation workspaces, so they may use temporary exploratory edits only when useful for investigation. Those edits are discarded and must not be presented as delivered implementation changes.
 
+## `pattern_candidate_selection`
+
+Use when the task is "compare known strategies and choose the best implementation-ready option."
+
+Good for:
+
+- choosing among user-authored implementation strategies
+- selecting an architecture direction after research has already found plausible options
+- preserving decision evidence before a downstream implementation node
+- comparing risk, repo fit, validation path, migration shape, or rollout posture
+
+Candidate strategies are authored inputs. The user or graph author chooses the candidate lanes; candidate selection does not discover strategies. Use `pattern_deep_research` first when the candidate set is still unknown or the workflow needs open-ended discovery.
+
+Each candidate gets an `intent` block. Use the candidate goal to define the strategy lane, acceptance criteria to require implementation outline, validation plan, risk, assumptions, and evidence, and constraints to keep the lane inside its intended tradeoff. Uniqueness starts in these candidate intents and is enforced by the diversity check after candidate packets are produced.
+
+Criteria are shared rubric-only judgments. Weights must sum to `1`; required criteria block candidates that fail or score below `pass_threshold`. Do not add command criteria, generated candidate counts, worker modes, custom public artifacts, patch promotion, or selector policy knobs.
+
+The stable output is `selection`, written at `selection.json`. Downstream implementation should consume `my_selection.selection` and usually feed that artifact into `pattern_deep_work`. Do not route downstream work to internal candidate packets, diversity results, criterion scorecards, or lowered ids.
+
+V1 is non-mutating. Candidate workers produce strategy packets, not patches. Source edits belong in downstream work after the selected strategy is known.
+
 ## `pattern_deep_work`
 
 Use when the task is "work, validate, critique, and fix until done" for one coherent work product.
@@ -86,6 +107,7 @@ Use `pattern_work_list` instead when order, prior item evidence, shared or cumul
 ## Avoid
 
 - Using managed patterns to hide vague requirements.
+- Using `pattern_candidate_selection` to discover strategies instead of comparing authored candidate lanes.
 - Using `pattern_work_list` for a coherent implementation task where item splitting makes local compliance easier but final completion less likely.
 - Using `pattern_map_reduce` when items need to build on earlier item results, edit shared files, or mutate cumulative shared state.
 - Depending on generated internal ids.

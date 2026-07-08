@@ -331,7 +331,7 @@ Image export uses `npx -y @mermaid-js/mermaid-cli` by default. Use `--diagram-im
 | `capabilities` | Reusable bundles of skill refs, managed tool grants, and ambient CLI hints. |
 | `graph` | The execution shape: containers, executable nodes, or managed patterns. |
 
-Executable nodes are `agent`, `exec`, `check`, and `checkpoint`; all require `intent.goal` and non-empty `intent.acceptance_criteria`, with optional `intent.constraints` normalized to `[]`. Constraint strings should start with `Do not`; positive requirements belong in acceptance criteria. Containers are `sequence`, `parallel`, and `repeat`. Managed patterns are `pattern_deep_research`, `pattern_deep_work`, `pattern_work_list`, and `pattern_map_reduce`.
+Executable nodes are `agent`, `exec`, `check`, and `checkpoint`; all require `intent.goal` and non-empty `intent.acceptance_criteria`, with optional `intent.constraints` normalized to `[]`. Constraint strings should start with `Do not`; positive requirements belong in acceptance criteria. Containers are `sequence`, `parallel`, and `repeat`. Managed patterns are `pattern_deep_research`, `pattern_candidate_selection`, `pattern_deep_work`, `pattern_work_list`, and `pattern_map_reduce`.
 
 Executable nodes choose repo/profile in `runtime` and receive non-authoritative help in `support`. `support.context` entries require `what` and `why`; skills and managed tools are selected directly or through `support.capabilities`; CLI hints are plain shell commands validated as callable and rendered in the prompt without wrappers, config, credentials, or ledgers.
 

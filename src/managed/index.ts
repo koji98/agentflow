@@ -13,6 +13,10 @@ export {
   buildPatternMapReduce,
   defaultPatternMapReducePublicArtifacts
 } from "./pattern_map_reduce.js";
+export {
+  buildPatternCandidateSelection,
+  defaultPatternCandidateSelectionPublicArtifacts
+} from "./pattern_candidate_selection.js";
 export type {
   ManagedPatternRuntime,
   ManagedPatternAgentOptions,
@@ -55,3 +59,9 @@ export type {
   PatternMapReduceMapBlock,
   PatternMapReduceReduceBlock
 } from "./pattern_map_reduce.js";
+export type {
+  PatternCandidateSelectionBlock,
+  PatternCandidateSelectionCandidate,
+  PatternCandidateSelectionConfig,
+  PatternCandidateSelectionCriterion
+} from "./pattern_candidate_selection.js";
