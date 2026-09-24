@@ -30,6 +30,7 @@ Use `agentflow-authoring` for graph creation and `agentflow-run-review` for post
 ## Decision Rules
 
 - Validate before expensive harness work.
+- Codex runs have network access by default, including read-only judges. File writes still follow the graph's `sandbox`. For network-off profiles and CLI requirements, see `docs/technical/codex-permissions.md` in the Agentflow repo. Do not switch a judge to full access to fix a local server error.
 - Start delivery review by checking `delivery/manifest.json` for `graph_status`, `delivery_status`, and `review_ready`, then use `delivery/01-review-brief.md`, `delivery/02-run-learnings.md`, and `delivery/03-audit-index.md`.
 - Use raw `events.jsonl`, attempts, and runtime logs only for debug, audit, or resume.
 - Treat missing or weak delivery as a run-quality failure even when code changed.

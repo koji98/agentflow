@@ -29,6 +29,7 @@ flowchart LR
 6. `prompt-surfaces.md`: canonical prompt renderer inventory, section model, authority boundaries, and prompt coverage.
 7. `prompt-cruft-rubric.md`: rejection rubric for prompt text that does not map to a real contract or eval.
 8. `harness-readiness-auth-ticket.md`: future work for a unified Cursor/Codex harness authentication readiness contract.
+9. `codex-permissions.md`: Codex file access, network access, and the network-off setting for a profile.
 
 ## Medium-Level Model
 

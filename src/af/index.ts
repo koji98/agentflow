@@ -29,6 +29,7 @@ import {
 } from "../runtime/af_command_policy.js";
 import { prepareAgentTools } from "../runtime/tools/setup.js";
 import { startSpawnBroker } from "../runtime/harness/spawn_broker.js";
+import { buildCodexPermissionArgs, codexNetworkAccessEnv } from "../runtime/harness/codex_permissions.js";
 import { buildHarnessSpawnEnv, formatToolContract } from "../runtime/harness/types.js";
 import type { AgentInvocation } from "../runtime/harness/types.js";
 import {
@@ -2351,8 +2352,7 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
         ]
       : [
           "exec",
-          "--sandbox",
-          session.sandbox,
+          ...buildCodexPermissionArgs(session.sandbox, process.env[codexNetworkAccessEnv] !== "false"),
           "--add-dir",
           outputDir,
           "--add-dir",

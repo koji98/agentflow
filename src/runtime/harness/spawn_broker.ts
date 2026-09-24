@@ -60,7 +60,7 @@ async function readAfPolicy(metadataPath: string | undefined): Promise<AfCommand
   }
 }
 
-export function startSpawnBroker(invocation: AgentInvocation): { stop(): void } {
+export function startSpawnBroker(invocation: AgentInvocation, envOverrides: NodeJS.ProcessEnv = {}): { stop(): void } {
   const runtimeDir = invocation.runtimeDir;
   const afRunner = invocation.toolEnv?.AGENTFLOW_AF_RUNNER;
   const afCli = invocation.toolEnv?.AGENTFLOW_AF_CLI;
@@ -134,6 +134,7 @@ export function startSpawnBroker(invocation: AgentInvocation): { stop(): void } 
           env: {
             ...process.env,
             ...invocation.toolEnv,
+            ...envOverrides,
             AGENTFLOW_AF_BROKER_CHILD: "1"
           },
           stdio: ["pipe", "pipe", "pipe"]
@@ -238,6 +239,7 @@ export function startSpawnBroker(invocation: AgentInvocation): { stop(): void } 
           stdio: "ignore",
           env: {
             ...process.env,
+            ...envOverrides,
             AGENTFLOW_RUNTIME_METADATA: session.parent_metadata_path,
             AGENTFLOW_INTERNAL_HELPER_RUN: "1"
           }

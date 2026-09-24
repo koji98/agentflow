@@ -80,13 +80,15 @@ Profiles may declare:
 
 In Codex isolated mode, Agentflow creates a temporary `CODEX_HOME`, links auth when available, and passes only the effective `codex.config`, `codex.mcp_servers`, `codex.plugins`, and `codex.notify` values. If no MCP servers or plugins are declared, isolated Codex runs have none by default.
 
+Codex read-only and workspace launches use the `agentflow` permission profile. Its base comes from the graph's `sandbox`; network access defaults to `true`. This lets read-only judges run local test servers while keeping app files protected. Set `harness_config.codex.config["permissions.agentflow.network.enabled"]` to `false` to turn it off. Helper agents inherit this choice. Full-access runs select Codex's built-in full-access profile directly and cannot turn network access off. See [Codex permissions](codex-permissions.md) for the full mapping and an example.
+
 In Cursor isolated mode, Agentflow creates a generated `CURSOR_CONFIG_DIR`, writes the Agentflow workspace and sandbox permissions, then merges declared `cursor.config` and `cursor.permissions`. Cursor `inherit_user` cannot combine with declared `cursor.config` or `cursor.permissions` because Agentflow would have no generated config file to merge into.
 
 If Cursor reports that sandbox mode is enabled but unavailable on the host, the Cursor harness treats it as a transient launch failure once: it waits 7 minutes and retries the same launch command. If the retry still fails, Agentflow records a trusted harness configuration failure, not an agent-recoverable task failure. The supervisor must not keep retrying the same node or silently disable sandboxing. Disable Cursor sandboxing only through the authored launch profile, for example by choosing a profile whose authority intentionally maps to disabled sandbox behavior.
 
 `isolation: "inherit_user"` is the normal worker parity mode. Codex runs keep the user's `CODEX_HOME`; Cursor runs keep the user's `CURSOR_CONFIG_DIR` and ambient CLI config. Agentflow still supplies required workspace, sandbox, output, context, runtime CLI, and plugin-tool environment. Use `isolation: "isolated"` when reproducibility is more important than native harness parity.
 
-Verifier, AI-check, supervisor-evidence, and delivery-curator invocations always force isolated no-external-tool harness config, even if their profile asks to inherit user config. Those prompts are runtime trust checks, not worker capability nodes.
+Verifier, AI-check, supervisor-evidence, and delivery-curator invocations always force isolated no-external-tool harness config, even if their profile asks to inherit user config. Codex trust checks keep only the profile's explicit network choice; other native config remains isolated. Those prompts are runtime trust checks, not worker capability nodes.
 
 Primitive worker attempts record native harness metadata when the CLI exposes it, including session or chat ids. Agentflow treats those ids as audit/debug evidence only. Retries start a fresh native harness session and continue from Agentflow-owned evidence: `events.jsonl`, artifacts, milestones, attempt memory, supervisor recovery decisions, and `af orient`.
 

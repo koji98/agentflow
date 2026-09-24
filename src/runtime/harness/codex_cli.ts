@@ -7,6 +7,12 @@ import { getHarnessCapabilities } from "../../graph/harness_capabilities.js";
 import { builtInCodexApprovalPolicy } from "../../graph/profiles.js";
 import { createProcessTerminationController } from "../process_control.js";
 import { startSpawnBroker } from "./spawn_broker.js";
+import {
+  buildCodexPermissionArgs,
+  codexNetworkAccessEnv,
+  codexNetworkAccessKey,
+  resolveCodexNetworkAccess
+} from "./codex_permissions.js";
 import { writePromptDiagnostics } from "./prompt_diagnostics.js";
 import {
   buildHarnessSpawnEnv,
@@ -66,7 +72,12 @@ function withCodexApprovalDefault(
 function resolveHarnessConfig(invocation: AgentInvocation): NonNullable<AgentInvocation["harnessConfig"]> {
   if (isTrustCheckPrompt(invocation)) {
     return withCodexApprovalDefault({
-      isolation: "isolated"
+      isolation: "isolated",
+      codex: {
+        config: {
+          [codexNetworkAccessKey]: resolveCodexNetworkAccess(invocation.harnessConfig?.codex?.config)
+        }
+      }
     });
   }
 
@@ -131,7 +142,7 @@ function pushCodexConfigArgs(args: string[], config: NonNullable<AgentInvocation
   }
 
   Object.entries(codexConfig.config ?? {})
-    .filter(([, value]) => value !== undefined)
+    .filter(([key, value]) => value !== undefined && key !== codexNetworkAccessKey)
     .sort(([left], [right]) => left.localeCompare(right))
     .forEach(([key, value]) => {
       args.push("-c", `${formatTomlKey(key)}=${formatTomlValue(value)}`);
@@ -150,8 +161,9 @@ function pushCodexConfigArgs(args: string[], config: NonNullable<AgentInvocation
   }
 }
 
-function buildCodexSpawnEnv(invocation: AgentInvocation, codexHomePath?: string): NodeJS.ProcessEnv {
+function buildCodexSpawnEnv(invocation: AgentInvocation, networkAccess: boolean, codexHomePath?: string): NodeJS.ProcessEnv {
   const env = buildHarnessSpawnEnv(invocation);
+  env[codexNetworkAccessEnv] = String(networkAccess);
 
   for (const key of Object.keys(env)) {
     if (key.startsWith("CODEX_") && key !== "CODEX_HOME") {
@@ -182,11 +194,6 @@ async function prepareIsolatedCodexHome(invocation: AgentInvocation): Promise<{
   await writeFile(
     join(codexHome, "config.toml"),
     [
-      `sandbox_mode = ${JSON.stringify(invocation.sandbox)}`,
-      "",
-      "[sandbox_workspace_write]",
-      "network_access = true",
-      "",
       `[projects.${JSON.stringify(invocation.repoPath)}]`,
       'trust_level = "trusted"'
     ].join("\n"),
@@ -236,15 +243,14 @@ function buildCodexArgs(
   };
   const globalArgs = [
     "--cd",
-    invocation.repoPath,
-    "--sandbox",
-    invocation.sandbox
+    invocation.repoPath
   ];
   pushAddDir(globalArgs, executionRoot);
   pushAddDir(globalArgs, invocation.outputDir);
   pushAddDir(globalArgs, invocation.runtimeDir);
   const commandArgs = ["exec", "--output-last-message", last_message_path];
   pushCodexConfigArgs(commandArgs, harnessConfig);
+  commandArgs.push(...buildCodexPermissionArgs(invocation.sandbox, resolveCodexNetworkAccess(harnessConfig.codex?.config)));
 
   if (invocation.skipGitRepoCheck) {
     commandArgs.push("--skip-git-repo-check");
@@ -310,7 +316,8 @@ export function createCodexCliHarness(
           }
         });
       }
-      const spawnBroker = startSpawnBroker(invocation);
+      const networkAccess = resolveCodexNetworkAccess(harnessConfig.codex?.config);
+      const spawnBroker = startSpawnBroker(invocation, { [codexNetworkAccessEnv]: String(networkAccess) });
       const codexHome = harnessConfig.isolation === "isolated"
         ? await prepareIsolatedCodexHome(invocation)
         : undefined;
@@ -318,7 +325,7 @@ export function createCodexCliHarness(
       return new Promise<HarnessResult>((resolve, reject) => {
         const child = spawn(binary, args, {
           cwd: invocation.repoPath,
-          env: buildCodexSpawnEnv(invocation, codexHome?.path),
+          env: buildCodexSpawnEnv(invocation, networkAccess, codexHome?.path),
           stdio: ["pipe", "pipe", "pipe"]
         });
         const stdoutChunks: Buffer[] = [];

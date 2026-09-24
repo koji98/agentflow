@@ -22,6 +22,7 @@ describe("validate:smoke contract", () => {
       "docs/technical/runtime-lifecycle.md",
       "docs/technical/context-and-artifacts.md",
       "docs/technical/runtime-tooling.md",
+      "docs/technical/codex-permissions.md",
       "docs/technical/outcome-verification.md",
       "docs/technical/node-workspace-snapshots.md",
       "docs/technical/prompt-surfaces.md",

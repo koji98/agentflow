@@ -49,6 +49,7 @@ process.stdin.on("end", () => {
       AGENTFLOW_CONTEXT_MANIFEST: process.env.AGENTFLOW_CONTEXT_MANIFEST,
       AGENTFLOW_RUNTIME_DIR: process.env.AGENTFLOW_RUNTIME_DIR,
       CODEX_HOME: process.env.CODEX_HOME,
+      AGENTFLOW_CODEX_NETWORK_ACCESS: process.env.AGENTFLOW_CODEX_NETWORK_ACCESS,
       CODEX_CI: process.env.CODEX_CI,
       CODEX_INTERNAL_ORIGINATOR_OVERRIDE: process.env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE,
       CODEX_SHELL: process.env.CODEX_SHELL,
@@ -56,6 +57,9 @@ process.stdin.on("end", () => {
     }, null, 2));
   }
 
+  if (process.env.MOCK_CONFIG_PATH) {
+    writeFileSync(process.env.MOCK_CONFIG_PATH, readFileSync(process.env.CODEX_HOME + "/config.toml", "utf8"));
+  }
   const args = process.argv.slice(2);
   const outputIndex = args.findIndex((arg) => arg === "--output-last-message");
   const lastMessagePath = outputIndex >= 0 ? args[outputIndex + 1] : undefined;
@@ -124,6 +128,138 @@ process.kill(process.pid, "SIGKILL");
 }
 
 describe("codex cli harness", () => {
+  it.each([
+    ["read-only", ":read-only"],
+    ["workspace-write", ":workspace"],
+    ["danger-full-access", ":danger-full-access"]
+  ] as const)("enables network without changing %s file access", async (sandbox, baseProfile) => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-codex-network-"));
+    const repoDir = join(tempRoot, "repo");
+    await mkdir(repoDir);
+    const mock = await createMockCodexBinary(tempRoot);
+    try {
+      const result = await createCodexCliHarness({ binary: mock.binary_path }).run({
+        runId: "run-network",
+        executionId: "exec-network",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox,
+        model: "auto",
+        baseEnv: { ...process.env, MOCK_ARGV_PATH: mock.argv_path, MOCK_ENV_PATH: mock.env_path },
+        nodeGoal: "Run tests within the declared file permissions.",
+        contextPacketPath: join(tempRoot, "context.json"),
+        contextManifestPath: join(tempRoot, "context.md"),
+        contextManifest: "",
+        outputDir: join(tempRoot, "output"),
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined
+      });
+      const argv = JSON.parse(await readFile(mock.argv_path, "utf8")) as string[];
+      const env = JSON.parse(await readFile(mock.env_path, "utf8")) as Record<string, string>;
+      expect(result.status).toBe("passed");
+      if (sandbox === "danger-full-access") {
+        expect(argv).toContain('default_permissions=":danger-full-access"');
+        expect(argv.some((arg) => arg.startsWith("permissions.agentflow="))).toBe(false);
+      } else {
+        expect(argv).toContain('default_permissions="agentflow"');
+        expect(argv).toContain(`permissions.agentflow={ extends = "${baseProfile}", network = { enabled = true } }`);
+      }
+      expect(argv).not.toContain("--sandbox");
+      expect(env.AGENTFLOW_CODEX_NETWORK_ACCESS).toBe("true");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["read-only", "false", "must be a boolean"],
+    ["danger-full-access", false, "cannot disable network access"]
+  ] as const)("rejects invalid network settings for %s before launch", async (sandbox, networkAccess, message) => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-codex-invalid-network-"));
+    const mock = await createMockCodexBinary(tempRoot);
+    try {
+      await expect(createCodexCliHarness({ binary: mock.binary_path }).run({
+        runId: "invalid-network",
+        executionId: "invalid-network",
+        repoAlias: "main",
+        repoPath: tempRoot,
+        sandbox,
+        model: "auto",
+        baseEnv: { ...process.env, MOCK_ARGV_PATH: mock.argv_path },
+        harnessConfig: { codex: { config: { "permissions.agentflow.network.enabled": networkAccess } } },
+        contextPacketPath: join(tempRoot, "context.json"),
+        contextManifestPath: join(tempRoot, "context.md"),
+        contextManifest: "",
+        outputDir: join(tempRoot, "output"),
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined
+      })).rejects.toThrow(message);
+      await expect(readFile(mock.argv_path, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([true, false])("keeps judge files protected with network access %s", async (networkAccess) => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-codex-judge-network-"));
+    const repoDir = join(tempRoot, "repo");
+    await mkdir(repoDir);
+    const mock = await createMockCodexBinary(tempRoot);
+    const configPath = join(tempRoot, "captured-config.toml");
+    try {
+      const result = await createCodexCliHarness({ binary: mock.binary_path }).run({
+        promptKind: "ai_check",
+        runId: "run-judge-network",
+        executionId: "exec-judge-network",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "read-only",
+        model: "auto",
+        baseEnv: {
+          ...process.env,
+          MOCK_ARGV_PATH: mock.argv_path,
+          MOCK_ENV_PATH: mock.env_path,
+          MOCK_CONFIG_PATH: configPath
+        },
+        nodeGoal: "Check the work without editing it.",
+        contextPacketPath: join(tempRoot, "context.json"),
+        contextManifestPath: join(tempRoot, "context.md"),
+        contextManifest: "",
+        outputDir: join(tempRoot, "output"),
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined,
+        harnessConfig: {
+          isolation: "inherit_user",
+          codex: {
+            config: {
+              "permissions.agentflow.network.enabled": networkAccess,
+              sandbox_mode: "danger-full-access"
+            },
+            mcp_servers: { ignored: { command: "must-not-run" } }
+          }
+        }
+      });
+      const argv = JSON.parse(await readFile(mock.argv_path, "utf8")) as string[];
+      const env = JSON.parse(await readFile(mock.env_path, "utf8")) as Record<string, string>;
+      const config = await readFile(configPath, "utf8");
+      expect(result.status).toBe("passed");
+      expect(argv).toContain('default_permissions="agentflow"');
+      expect(argv).toContain(`permissions.agentflow={ extends = ":read-only", network = { enabled = ${networkAccess} } }`);
+      expect(argv.join(" ")).not.toContain("danger-full-access");
+      expect(argv.join(" ")).not.toContain("must-not-run");
+      expect(argv).not.toContain("--sandbox");
+      expect(config).not.toContain("sandbox_mode");
+      expect(config).not.toContain("sandbox_workspace_write");
+      expect(env.CODEX_HOME).toContain("agentflow-codex-home-");
+      expect(env.AGENTFLOW_CODEX_NETWORK_ACCESS).toBe(String(networkAccess));
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("reports isolated CODEX_HOME cleanup failures as warnings instead of throwing", async () => {
     const warning = await cleanupIsolatedCodexHome({
       path: "/tmp/agentflow-codex-home-test",
@@ -286,8 +422,8 @@ describe("codex cli harness", () => {
           "exec",
           "--cd",
           repoDir,
-          "--sandbox",
-          "workspace-write",
+          "-c",
+          'default_permissions="agentflow"',
           "--add-dir",
           executionDir,
           "--add-dir",
@@ -333,6 +469,7 @@ describe("codex cli harness", () => {
       expect(prompt).toContain("## Operating Brief");
       expect(prompt).toContain("Before final response, run `af complete check`");
       expect(env).toEqual({
+        AGENTFLOW_CODEX_NETWORK_ACCESS: "true",
         AGENTFLOW_WORKSPACE: repoDir,
         AGENTFLOW_OUTPUT_DIR: outputDir,
         AGENTFLOW_CONTEXT_PACKET: join(executionDir, "runtime", "context.json"),
