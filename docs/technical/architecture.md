@@ -133,7 +133,7 @@ Codex CLI and Cursor CLI are adapters behind one Agentflow harness contract. Bot
 - the same sandbox and timeout policy
 - the same `$AGENTFLOW_OUTPUT_DIR`
 
-Both adapters also support `check_kind: "ai"`. AI checks run in the read-only sandbox and must return structured evaluation JSON. Cursor runs with JSON output enabled and uses Cursor model ids directly; graphs must not set `reasoning_effort` on Cursor profiles or Cursor agent/check nodes.
+Both adapters also support `check_kind: "ai"`. AI checks run in the read-only sandbox and must return structured evaluation JSON. Codex checks have network access by default so they can start local test servers; app files stay read-only. See [Codex permissions](codex-permissions.md). Cursor runs with JSON output enabled and uses Cursor model ids directly; graphs must not set `reasoning_effort` on Cursor profiles or Cursor agent/check nodes.
 
 Continuity comes from Agentflow artifacts and resume logic, not from assuming persistent harness chat state.
 

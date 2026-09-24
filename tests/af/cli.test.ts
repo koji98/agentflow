@@ -137,6 +137,7 @@ describe("af runtime CLI", () => {
         originalInternalHelperRun = process.env.AGENTFLOW_INTERNAL_HELPER_RUN;
     });
     afterEach(async () => {
+        vi.unstubAllEnvs();
         if (originalMetadata === undefined) {
             delete process.env.AGENTFLOW_RUNTIME_METADATA;
         }
@@ -579,6 +580,46 @@ describe("af runtime CLI", () => {
         await expect(executeAfCli(["artifact", "write", "pdf", "--file", sourcePdf]))
             .resolves.toMatchObject({ exitCode: 0 });
         await expect(readFile(join(runtime.output, "exports/report.pdf"))).resolves.toEqual(pdfBytes);
+    });
+    it.each(["true", "false"])("keeps network access %s in broker commands and queued helpers", async (networkAccess) => {
+        const runtime = await createRuntime(tempRoot);
+        const runtimeDir = join(runtime.root, "runtime");
+        const brokerDir = join(tempRoot, "broker");
+        const helperDir = join(runtimeDir, "helpers", "helper-one");
+        const helperEnvPath = join(tempRoot, "helper-env.txt");
+        const mockCli = join(tempRoot, "mock-af.mjs");
+        await mkdir(helperDir, { recursive: true });
+        await mkdir(join(brokerDir, "requests"), { recursive: true });
+        await writeFile(mockCli, [
+            "import { writeFileSync } from 'node:fs';",
+            "const value = String(process.env.AGENTFLOW_CODEX_NETWORK_ACCESS);",
+            `if (process.argv.includes('_helper-run')) writeFileSync(${JSON.stringify(helperEnvPath)}, value);`,
+            "else process.stdout.write(value);"
+        ].join("\n"));
+        await writeFile(join(helperDir, "session.json"), JSON.stringify({
+            agent_id: "helper-one", status: "starting", parent_metadata_path: runtime.metadata
+        }));
+        await writeFile(join(brokerDir, "requests", "orient.json"), JSON.stringify({ id: "orient", argv: ["orient"] }));
+        vi.stubEnv("AGENTFLOW_CODEX_NETWORK_ACCESS", networkAccess === "true" ? "false" : "true");
+        const broker = startSpawnBroker({
+            repoPath: runtime.workspace,
+            runtimeDir,
+            toolEnv: {
+                AGENTFLOW_RUNTIME_METADATA: runtime.metadata,
+                AGENTFLOW_AF_BROKER_DIR: brokerDir,
+                AGENTFLOW_AF_RUNNER: process.execPath,
+                AGENTFLOW_AF_CLI: mockCli
+            }
+        } as any, { AGENTFLOW_CODEX_NETWORK_ACCESS: networkAccess });
+        try {
+            await vi.waitFor(async () => {
+                const response = JSON.parse(await readFile(join(brokerDir, "responses", "orient.json"), "utf8"));
+                expect(response.stdout).toBe(networkAccess);
+                expect(await readFile(helperEnvPath, "utf8")).toBe(networkAccess);
+            }, { timeout: 3000 });
+        } finally {
+            broker.stop();
+        }
     });
     it("routes af mutations through the parent broker so sandboxed agents do not write run state directly", async () => {
         const runtime = await createRuntime(tempRoot);
@@ -1287,14 +1328,16 @@ describe("af runtime CLI", () => {
         ]);
         await expect(readFile(records[0]!.output_path!, "utf8")).resolves.toContain("# Task Orientation");
     });
-    it("spawns a helper with its own metadata and waits for the helper artifact", async () => {
+    it.each(["true", "false"])("spawns a helper with inherited network access %s and waits for its artifact", async (networkAccess) => {
         const runtime = await createRuntime(tempRoot, undefined, { af_command_policy: "orchestrator" });
         const codexBin = join(tempRoot, "mock-codex.mjs");
+        const argvPath = join(tempRoot, "helper-argv.json");
         await writeExecutable(codexBin, [
             "#!/usr/bin/env node",
             "import { mkdirSync, writeFileSync } from 'node:fs';",
             "import { dirname, join } from 'node:path';",
             "if (!process.env.AGENTFLOW_RUNTIME_METADATA) process.exit(42);",
+            `writeFileSync(${JSON.stringify(argvPath)}, JSON.stringify(process.argv.slice(2)));`,
             "const artifact = join(process.env.AGENTFLOW_OUTPUT_DIR, 'helper-report.md');",
             "mkdirSync(dirname(artifact), { recursive: true });",
             "writeFileSync(artifact, `helper ok\\nmetadata=${process.env.AGENTFLOW_RUNTIME_METADATA}\\n`);",
@@ -1302,6 +1345,7 @@ describe("af runtime CLI", () => {
         ].join("\n"));
         process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
         process.env.AGENTFLOW_CODEX_CLI_BIN = codexBin;
+        vi.stubEnv("AGENTFLOW_CODEX_NETWORK_ACCESS", networkAccess);
         const spawned = outputOf<{
             status: string;
             agent: {
@@ -1330,6 +1374,10 @@ describe("af runtime CLI", () => {
         expect(spawned.agent.status).toBe("completed");
         expect(spawned.agent.role).toBe("evidence_mapper");
         expect(spawned.agent.sandbox).toBe("read-only");
+        const argv = JSON.parse(await readFile(argvPath, "utf8")) as string[];
+        expect(argv).toContain('default_permissions="agentflow_judge_permissions"');
+        expect(argv).toContain(`permissions.agentflow_judge_permissions={ extends = ":read-only", network = { enabled = ${networkAccess} } }`);
+        expect(argv).not.toContain("--sandbox");
         expect(spawned.agent.input_case_file).toBe(join(runtime.root, "case-file.json"));
         await expect(readFile(spawned.artifact, "utf8")).resolves.toContain("helper ok");
         const helperPrompt = await readFile(spawned.agent.prompt_path!, "utf8");

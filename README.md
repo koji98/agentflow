@@ -272,7 +272,9 @@ This is the canonical small graph shape: explicit repo, profiles, supervisor pro
 }
 ```
 
-Switching from Codex CLI to Cursor CLI is a launch-profile choice, not a different graph language. Both harnesses receive the same context packet, runtime CLI, optional support metadata, artifact contract, and output directory. Normal worker profiles inherit native Codex/Cursor config by default; set `profiles.*.harness_config.isolation: "isolated"` when reproducibility matters more than native harness parity. Codex profiles default `approval_policy` to `"never"` so Agentflow owns recovery and authority pauses, while `sandbox` remains the graph's permission boundary. `model: "auto"` means Agentflow does not pass an explicit model flag to the selected harness.
+Switching from Codex CLI to Cursor CLI is a launch-profile choice, not a different graph language. Both harnesses receive the same context packet, runtime CLI, optional support metadata, artifact contract, and output directory. Normal worker profiles inherit native Codex/Cursor config by default; set `profiles.*.harness_config.isolation: "isolated"` when reproducibility matters more than native harness parity. Codex profiles default `approval_policy` to `"never"` so Agentflow owns recovery and authority pauses. `model: "auto"` means Agentflow does not pass an explicit model flag to the selected harness.
+
+Codex runs have network access by default, including AI judges. They can reach the internet and start local test servers. The graph's `sandbox` still controls file access: a `read-only` judge cannot edit app files. See [Codex permissions](docs/technical/codex-permissions.md) to turn network access off for a profile.
 
 ## CLI Commands
 
