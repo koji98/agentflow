@@ -1,6 +1,6 @@
 import type { SandboxMode } from "../../graph/schema.js";
 
-export const codexNetworkAccessKey = "permissions.agentflow.network.enabled";
+export const codexNetworkAccessKey = "permissions.agentflow_judge_permissions.network.enabled";
 export const codexNetworkAccessEnv = "AGENTFLOW_CODEX_NETWORK_ACCESS";
 
 const baseProfiles: Record<Exclude<SandboxMode, "danger-full-access">, string> = {
@@ -26,7 +26,7 @@ export function buildCodexPermissionArgs(sandbox: SandboxMode, networkAccess: bo
   }
 
   return [
-    "-c", 'default_permissions="agentflow"',
-    "-c", `permissions.agentflow={ extends = "${baseProfiles[sandbox]}", network = { enabled = ${networkAccess} } }`
+    "-c", 'default_permissions="agentflow_judge_permissions"',
+    "-c", `permissions.agentflow_judge_permissions={ extends = "${baseProfiles[sandbox]}", network = { enabled = ${networkAccess} } }`
   ];
 }

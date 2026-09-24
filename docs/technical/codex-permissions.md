@@ -13,7 +13,7 @@ Add this setting to the graph profile used by the run or node:
   "harness_config": {
     "codex": {
       "config": {
-        "permissions.agentflow.network.enabled": false
+        "permissions.agentflow_judge_permissions.network.enabled": false
       }
     }
   }
@@ -34,7 +34,7 @@ Agentflow uses Codex permission profiles. The graph's `sandbox` chooses its file
 | `workspace-write` | `:workspace` | Read and write within the allowed workspace. |
 | `danger-full-access` | `:danger-full-access` (selected directly) | No file or network sandbox. |
 
-For read-only and workspace runs, Agentflow extends the base with a named profile, `agentflow`, and sets the network choice there. Full-access runs select the built-in profile directly because Codex does not allow extending it. Agentflow does not also pass the older Codex `--sandbox` flag or write older sandbox settings into its temporary config.
+For read-only and workspace runs, Agentflow extends the base with a named profile, `agentflow_judge_permissions`, and sets the network choice there. Full-access runs select the built-in profile directly because Codex does not allow extending it. Agentflow does not also pass the older Codex `--sandbox` flag or write older sandbox settings into its temporary config.
 
 Normal workers still inherit the user's other Codex settings. AI judges, outcome verifiers, evidence checks, and delivery reviews still use an isolated Codex config. They keep only the graph profile's network choice from the supplied native config.
 

@@ -1375,8 +1375,8 @@ describe("af runtime CLI", () => {
         expect(spawned.agent.role).toBe("evidence_mapper");
         expect(spawned.agent.sandbox).toBe("read-only");
         const argv = JSON.parse(await readFile(argvPath, "utf8")) as string[];
-        expect(argv).toContain('default_permissions="agentflow"');
-        expect(argv).toContain(`permissions.agentflow={ extends = ":read-only", network = { enabled = ${networkAccess} } }`);
+        expect(argv).toContain('default_permissions="agentflow_judge_permissions"');
+        expect(argv).toContain(`permissions.agentflow_judge_permissions={ extends = ":read-only", network = { enabled = ${networkAccess} } }`);
         expect(argv).not.toContain("--sandbox");
         expect(spawned.agent.input_case_file).toBe(join(runtime.root, "case-file.json"));
         await expect(readFile(spawned.artifact, "utf8")).resolves.toContain("helper ok");

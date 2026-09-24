@@ -160,10 +160,10 @@ describe("codex cli harness", () => {
       expect(result.status).toBe("passed");
       if (sandbox === "danger-full-access") {
         expect(argv).toContain('default_permissions=":danger-full-access"');
-        expect(argv.some((arg) => arg.startsWith("permissions.agentflow="))).toBe(false);
+        expect(argv.some((arg) => arg.startsWith("permissions.agentflow_judge_permissions="))).toBe(false);
       } else {
-        expect(argv).toContain('default_permissions="agentflow"');
-        expect(argv).toContain(`permissions.agentflow={ extends = "${baseProfile}", network = { enabled = true } }`);
+        expect(argv).toContain('default_permissions="agentflow_judge_permissions"');
+        expect(argv).toContain(`permissions.agentflow_judge_permissions={ extends = "${baseProfile}", network = { enabled = true } }`);
       }
       expect(argv).not.toContain("--sandbox");
       expect(env.AGENTFLOW_CODEX_NETWORK_ACCESS).toBe("true");
@@ -187,7 +187,7 @@ describe("codex cli harness", () => {
         sandbox,
         model: "auto",
         baseEnv: { ...process.env, MOCK_ARGV_PATH: mock.argv_path },
-        harnessConfig: { codex: { config: { "permissions.agentflow.network.enabled": networkAccess } } },
+        harnessConfig: { codex: { config: { "permissions.agentflow_judge_permissions.network.enabled": networkAccess } } },
         contextPacketPath: join(tempRoot, "context.json"),
         contextManifestPath: join(tempRoot, "context.md"),
         contextManifest: "",
@@ -235,7 +235,7 @@ describe("codex cli harness", () => {
           isolation: "inherit_user",
           codex: {
             config: {
-              "permissions.agentflow.network.enabled": networkAccess,
+              "permissions.agentflow_judge_permissions.network.enabled": networkAccess,
               sandbox_mode: "danger-full-access"
             },
             mcp_servers: { ignored: { command: "must-not-run" } }
@@ -246,8 +246,8 @@ describe("codex cli harness", () => {
       const env = JSON.parse(await readFile(mock.env_path, "utf8")) as Record<string, string>;
       const config = await readFile(configPath, "utf8");
       expect(result.status).toBe("passed");
-      expect(argv).toContain('default_permissions="agentflow"');
-      expect(argv).toContain(`permissions.agentflow={ extends = ":read-only", network = { enabled = ${networkAccess} } }`);
+      expect(argv).toContain('default_permissions="agentflow_judge_permissions"');
+      expect(argv).toContain(`permissions.agentflow_judge_permissions={ extends = ":read-only", network = { enabled = ${networkAccess} } }`);
       expect(argv.join(" ")).not.toContain("danger-full-access");
       expect(argv.join(" ")).not.toContain("must-not-run");
       expect(argv).not.toContain("--sandbox");
@@ -423,7 +423,7 @@ describe("codex cli harness", () => {
           "--cd",
           repoDir,
           "-c",
-          'default_permissions="agentflow"',
+          'default_permissions="agentflow_judge_permissions"',
           "--add-dir",
           executionDir,
           "--add-dir",
